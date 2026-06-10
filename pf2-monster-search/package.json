@@ -1,0 +1,18 @@
+{
+  "name": "pf2-monster-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PF2 Archives of Nethys monster search UI for SQL Server",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "dev": "concurrently \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "start": "npm --prefix server start",
+    "build": "npm --prefix client run build",
+    "preview": "npm --prefix client run preview"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2",
+    "msnodesqlv8": "^5.2.0",
+    "mssql": "^12.5.5"
+  }
+}
