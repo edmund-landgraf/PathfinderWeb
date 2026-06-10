@@ -261,13 +261,29 @@ app.get('/api/monsters', async (req, res) => {
 
     addStringFilter(request, where, debugParams, 'Family', 'family', req.query.family);
     addStringFilter(request, where, debugParams, 'SourceBook', 'sourceBook', req.query.sourceBook);
+
+    // old slow LIKE search - remove this
+    // addStringFilter(request, where, debugParams, 'RawText', 'text', req.query.text);
+
+    // new fast full-text search
     if (req.query.text && String(req.query.text).trim() !== '') {
       const clean = String(req.query.text).trim();
-      request.input('text', sql.NVarChar, clean);
-      where.push(`CONTAINS((Name, RawText), @text)`);
+      const ft = `"${clean}*"`;
+
+      request.input('text', sql.NVarChar, ft);
+
+      where.push(`
+        MonsterId IN (
+          SELECT MonsterId
+          FROM pf2.Monster
+          WHERE CONTAINS((Name, RawText), @text)
+        )
+      `);
+
       debugParams.text = {
         type: 'FullText',
-        value: clean,
+        value: ft,
+        table: 'pf2.Monster',
         columns: 'Name, RawText'
       };
     }
