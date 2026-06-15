@@ -1,0 +1,38 @@
+[
+  {
+    "date": "2026-06-14",
+    "comment": "Added Updates page with a development log sourced from git commit messages (no repository links)."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Removed the Grid right/below layout toggle from Monsters and NPCs search; layout is fixed side-by-side for now."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Escape closes entity modals the same as the close button; nested MD and image popouts close first."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Left and right arrow keys browse previous and next result rows while a detail modal stays open."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Spell, Feat, and Equipment modals now match the Monster modal layout: description pane, markdown section, field grids, and image popout support."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Split markdown description extraction: monsters use lead paragraphs; spells, feats, and equipment pull prose after the first horizontal rule."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Added NPCs as a fifth home library with its own search page and API endpoint; Monsters search excludes NPCs."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Monster art double-click opens a full-size image popout scaled to fit the viewport with margin."
+  },
+  {
+    "date": "2026-06-14",
+    "comment": "Navigation bar always shows all sections including the current page, with the active page highlighted."
+  }
+]

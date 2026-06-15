@@ -159,7 +159,7 @@ function buildSpellOrderBy(sortBy, sortDir) {
     Rank: 's.Rank',
     SpellType: 's.SpellType',
     Rarity: 'r.Name',
-    SourceBook: 'sb.Name',
+    SourceBook: 'sources.SourceBook',
     Traditions: 'traditions.Traditions',
     Traits: 'traits.Traits',
     Actions: 's.Actions',
@@ -185,7 +185,7 @@ function buildFeatOrderBy(sortBy, sortDir) {
     Level: 'f.Level',
     FeatType: 'f.FeatType',
     Rarity: 'r.Name',
-    SourceBook: 'sb.Name',
+    SourceBook: 'sources.SourceBook',
     Traits: 'traits.Traits',
     PFS: 'f.PFS',
     IsStandardAncestryFeat: 'f.IsStandardAncestryFeat'
@@ -212,7 +212,7 @@ function buildEquipmentOrderBy(sortBy, sortDir) {
     ItemCategory: 'e.ItemCategory',
     ItemSubcategory: 'e.ItemSubcategory',
     Rarity: 'r.Name',
-    SourceBook: 'sb.Name',
+    SourceBook: 'sources.SourceBook',
     Traits: 'traits.Traits',
     PriceCp: 'e.PriceCp',
     BulkValue: 'e.BulkValue',
@@ -530,7 +530,7 @@ app.get('/api/equipment', async (req, res) => {
     addStringFilter(request, where, debugParams, 'e.ItemCategory', 'itemCategory', req.query.itemCategory);
     addStringFilter(request, where, debugParams, 'e.ItemSubcategory', 'itemSubcategory', req.query.itemSubcategory);
     addStringFilter(request, where, debugParams, 'r.Name', 'rarity', req.query.rarity, true);
-    addStringFilter(request, where, debugParams, 'sb.Name', 'sourceBook', req.query.sourceBook);
+    addStringFilter(request, where, debugParams, 'sources.SourceBook', 'sourceBook', req.query.sourceBook);
     addStringFilter(request, where, debugParams, 'e.PFS', 'pfs', req.query.pfs);
     addStringFilter(request, where, debugParams, 'e.PriceText', 'price', req.query.price);
     addStringFilter(request, where, debugParams, 'e.BulkText', 'bulk', req.query.bulk);
@@ -622,6 +622,23 @@ app.get('/api/equipment', async (req, res) => {
           ON t.TraitId = et.TraitId
         WHERE et.EquipmentId = e.EquipmentId
       ) traits
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, esl.EquipmentSourceLinkId AS SortOrder
+            FROM pf2.EquipmentSourceLink esl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = esl.SourceBookId
+            WHERE esl.EquipmentId = e.EquipmentId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const countFromSql = `
@@ -630,6 +647,23 @@ app.get('/api/equipment', async (req, res) => {
         ON r.RarityId = e.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = e.SourceBookId
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, esl.EquipmentSourceLinkId AS SortOrder
+            FROM pf2.EquipmentSourceLink esl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = esl.SourceBookId
+            WHERE esl.EquipmentId = e.EquipmentId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -647,7 +681,7 @@ app.get('/api/equipment', async (req, res) => {
         e.ItemCategory,
         e.ItemSubcategory,
         r.Name AS Rarity,
-        sb.Name AS SourceBook,
+        sources.SourceBook,
         e.SourcePage,
         traits.Traits,
         e.PFS,
@@ -677,6 +711,7 @@ app.get('/api/equipment', async (req, res) => {
         e.HPText,
         e.RawHtml,
         e.RawText,
+        e.RawMD,
         e.RawJson
       ${fromSql}
       ${whereSql}
@@ -756,7 +791,7 @@ app.get('/api/feats', async (req, res) => {
     addIntFilter(request, where, debugParams, 'f.Level', 'levelMax', req.query.levelMax, '<=');
     addStringFilter(request, where, debugParams, 'f.FeatType', 'featType', req.query.featType);
     addStringFilter(request, where, debugParams, 'r.Name', 'rarity', req.query.rarity, true);
-    addStringFilter(request, where, debugParams, 'sb.Name', 'sourceBook', req.query.sourceBook);
+    addStringFilter(request, where, debugParams, 'sources.SourceBook', 'sourceBook', req.query.sourceBook);
     addStringFilter(request, where, debugParams, 'f.PFS', 'pfs', req.query.pfs);
     addBoolFilter(request, where, debugParams, 'f.IsStandardAncestryFeat', 'isStandardAncestryFeat', req.query.isStandardAncestryFeat);
 
@@ -837,6 +872,23 @@ app.get('/api/feats', async (req, res) => {
           ON t.TraitId = ft.TraitId
         WHERE ft.FeatId = f.FeatId
       ) traits
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, fsl.FeatSourceLinkId AS SortOrder
+            FROM pf2.FeatSourceLink fsl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = fsl.SourceBookId
+            WHERE fsl.FeatId = f.FeatId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const countFromSql = `
@@ -845,6 +897,23 @@ app.get('/api/feats', async (req, res) => {
         ON r.RarityId = f.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = f.SourceBookId
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, fsl.FeatSourceLinkId AS SortOrder
+            FROM pf2.FeatSourceLink fsl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = fsl.SourceBookId
+            WHERE fsl.FeatId = f.FeatId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -858,7 +927,7 @@ app.get('/api/feats', async (req, res) => {
         f.Level,
         f.FeatType,
         r.Name AS Rarity,
-        sb.Name AS SourceBook,
+        sources.SourceBook,
         f.SourcePage,
         traits.Traits,
         f.PFS,
@@ -867,6 +936,7 @@ app.get('/api/feats', async (req, res) => {
         f.RemasterId,
         f.RawHtml,
         f.RawText,
+        f.RawMD,
         f.RawJson
       ${fromSql}
       ${whereSql}
@@ -946,7 +1016,7 @@ app.get('/api/spells', async (req, res) => {
     addIntFilter(request, where, debugParams, 's.Rank', 'rankMax', req.query.rankMax, '<=');
     addStringFilter(request, where, debugParams, 's.SpellType', 'spellType', req.query.spellType);
     addStringFilter(request, where, debugParams, 'r.Name', 'rarity', req.query.rarity, true);
-    addStringFilter(request, where, debugParams, 'sb.Name', 'sourceBook', req.query.sourceBook);
+    addStringFilter(request, where, debugParams, 'sources.SourceBook', 'sourceBook', req.query.sourceBook);
     addStringFilter(request, where, debugParams, 's.Actions', 'actions', req.query.actions);
     addStringFilter(request, where, debugParams, 's.Defense', 'defense', req.query.defense);
     addStringFilter(request, where, debugParams, 's.Duration', 'duration', req.query.duration);
@@ -1056,6 +1126,23 @@ app.get('/api/spells', async (req, res) => {
           ON t.TraitId = st.TraitId
         WHERE st.SpellId = s.SpellId
       ) traits
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, ssl.SpellSourceLinkId AS SortOrder
+            FROM pf2.SpellSourceLink ssl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = ssl.SourceBookId
+            WHERE ssl.SpellId = s.SpellId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const countFromSql = `
@@ -1064,6 +1151,23 @@ app.get('/api/spells', async (req, res) => {
         ON r.RarityId = s.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = s.SourceBookId
+      OUTER APPLY (
+        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
+        FROM (
+          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, ssl.SpellSourceLinkId AS SortOrder
+            FROM pf2.SpellSourceLink ssl
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = ssl.SourceBookId
+            WHERE ssl.SpellId = s.SpellId
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -1077,7 +1181,7 @@ app.get('/api/spells', async (req, res) => {
         s.Rank,
         s.SpellType,
         r.Name AS Rarity,
-        sb.Name AS SourceBook,
+        sources.SourceBook,
         s.SourcePage,
         traditions.Traditions,
         traits.Traits,
@@ -1099,6 +1203,7 @@ app.get('/api/spells', async (req, res) => {
         s.RemasterName,
         s.RawHtml,
         s.RawText,
+        s.RawMD,
         s.RawJson
       ${fromSql}
       ${whereSql}
@@ -1160,11 +1265,11 @@ app.get('/api/spells', async (req, res) => {
   }
 });
 
-app.get('/api/monsters', async (req, res) => {
+async function queryCreatures(req, res, { routeLabel, npcMode }) {
   const started = Date.now();
 
   try {
-    logSection('GET /api/monsters');
+    logSection(routeLabel);
     logValue('Raw query params:', req.query);
 
     const pool = await getPool();
@@ -1184,10 +1289,6 @@ app.get('/api/monsters', async (req, res) => {
     addStringFilter(request, where, debugParams, 'Family', 'family', req.query.family);
     addStringFilter(request, where, debugParams, 'SourceBook', 'sourceBook', req.query.sourceBook);
 
-    // old slow LIKE search - remove this
-    // addStringFilter(request, where, debugParams, 'RawText', 'text', req.query.text);
-
-    // new fast full-text search
     if (req.query.text && String(req.query.text).trim() !== '') {
       const clean = String(req.query.text).trim();
       const ft = `"${clean}*"`;
@@ -1214,7 +1315,16 @@ app.get('/api/monsters', async (req, res) => {
     addStringFilter(request, where, debugParams, 'Senses', 'senses', req.query.senses);
     addStringFilter(request, where, debugParams, 'Speed', 'speed', req.query.speed);
 
-    addBoolFilter(request, where, debugParams, 'IsNPC', 'isNPC', req.query.isNPC);
+    const npcBit = npcMode === 'only' ? 1 : 0;
+    request.input('isNpcFilter', sql.Bit, npcBit);
+    where.push('IsNPC = @isNpcFilter');
+    debugParams.isNpcFilter = {
+      type: 'Bit',
+      value: npcBit,
+      column: 'IsNPC',
+      mode: npcMode
+    };
+
     addBoolFilter(request, where, debugParams, 'IsUnique', 'isUnique', req.query.isUnique);
 
     addIntFilter(request, where, debugParams, 'HP', 'hpMin', req.query.hpMin, '>=');
@@ -1307,7 +1417,17 @@ app.get('/api/monsters', async (req, res) => {
         : undefined
     });
   }
-});
+}
+
+app.get('/api/monsters', (req, res) => queryCreatures(req, res, {
+  routeLabel: 'GET /api/monsters',
+  npcMode: 'exclude'
+}));
+
+app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
+  routeLabel: 'GET /api/npcs',
+  npcMode: 'only'
+}));
 
 app.listen(port, () => {
   console.log(`PF2 monster search API listening on http://localhost:${port}`);
