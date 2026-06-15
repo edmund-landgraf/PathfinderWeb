@@ -8,11 +8,36 @@ const extraPath = join(rootDir, 'scripts', 'updates.extra.json');
 const outputPath = join(rootDir, 'client', 'public', 'updates.json');
 const utilitiesRepo = 'edmund-landgraf/PathfinderUtilities';
 
+function resolveGitRoot() {
+  let dir = rootDir;
+
+  while (true) {
+    try {
+      const toplevel = execSync('git -c safe.directory=* rev-parse --show-toplevel', {
+        cwd: dir,
+        encoding: 'utf8'
+      }).trim();
+      execSync('git -c safe.directory=* rev-parse HEAD', { cwd: toplevel, stdio: 'ignore' });
+      return toplevel;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  }
+}
+
 function readGitEntries() {
+  const gitRoot = resolveGitRoot();
+  if (!gitRoot) {
+    console.warn('Could not find a git repository with commits for web update history.');
+    return [];
+  }
+
   try {
     const output = execSync(
       'git -c safe.directory=* log --format="%ad|%s" --date=short',
-      { cwd: rootDir, encoding: 'utf8' }
+      { cwd: gitRoot, encoding: 'utf8' }
     );
 
     return output

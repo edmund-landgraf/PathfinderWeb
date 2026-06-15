@@ -1,12 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getPool, sql } from './db.js';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3333);
+const rootDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const clientDistDir = join(rootDir, 'client', 'dist');
 
 app.use(cors());
 app.use(express.json());
@@ -1429,7 +1434,27 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   npcMode: 'only'
 }));
 
+if (existsSync(clientDistDir)) {
+  app.use(express.static(clientDistDir));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+
+    res.sendFile(join(clientDistDir, 'index.html'), (err) => {
+      if (err) next(err);
+    });
+  });
+}
+
 app.listen(port, () => {
-  console.log(`PF2 monster search API listening on http://localhost:${port}`);
+  console.log(`PF2 search listening on http://localhost:${port}`);
+  if (existsSync(clientDistDir)) {
+    console.log(`Serving client from ${clientDistDir}`);
+  } else {
+    console.log('Client dist not found — API only. Run "npm run build" to serve the UI from this process.');
+  }
   console.log(`DEBUG_SQL=${DEBUG_SQL}`);
 });
