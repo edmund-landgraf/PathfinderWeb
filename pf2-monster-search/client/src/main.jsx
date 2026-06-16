@@ -12,6 +12,20 @@ import { utilitiesUpdatesDescription, webUpdatesDescription } from './updatesDes
 import './styles.css';
 
 
+async function readApiError(res) {
+  const text = await res.text();
+  if (!text) return `Request failed (${res.status})`;
+
+  try {
+    const data = JSON.parse(text);
+    if (typeof data.error === 'string' && data.error) return data.error;
+    if (data.error) return JSON.stringify(data.error);
+    return text;
+  } catch {
+    return text;
+  }
+}
+
 const emptyFilters = {
   name: '',
   levelMin: '',
@@ -182,6 +196,17 @@ function scrollResultRowIntoView(rowId) {
   });
 }
 
+function getVisibleRowJumpSize() {
+  const tableWrap = document.querySelector('.resultsPanel .tableWrap');
+  const sampleRow = tableWrap?.querySelector('tbody tr[data-row-id]');
+  if (!tableWrap || !sampleRow) return 10;
+
+  const rowHeight = sampleRow.getBoundingClientRect().height;
+  if (!rowHeight) return 10;
+
+  return Math.max(1, Math.floor(tableWrap.clientHeight / rowHeight));
+}
+
 function useModalRowNavigation({ rows, activeRecord, onChange, idField }) {
   useEffect(() => {
     if (!activeRecord) return;
@@ -210,21 +235,46 @@ function useModalRowNavigation({ rows, activeRecord, onChange, idField }) {
 
 function useGridRowNavigation({ rows, selected, onChange, idField, enabled = true }) {
   useEffect(() => {
-    if (!enabled || !selected) return;
+    if (!enabled) return;
 
     function handleKeyDown(event) {
-      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
       if (isEditableTarget(event.target)) return;
       if (isNestedPopoutOpen()) return;
+
+      if (event.key === 'Home' || event.key === 'End') {
+        if (rows.length === 0) return;
+
+        const nextIndex = event.key === 'Home' ? 0 : rows.length - 1;
+        const currentIndex = selected
+          ? rows.findIndex((row) => row[idField] === selected[idField])
+          : -1;
+        if (currentIndex === nextIndex) return;
+
+        event.preventDefault();
+        const nextRow = rows[nextIndex];
+        onChange(nextRow);
+        scrollResultRowIntoView(nextRow[idField]);
+        return;
+      }
+
+      if (!selected) return;
+
+      const isUp = event.key === 'ArrowUp' || event.key === 'PageUp';
+      const isDown = event.key === 'ArrowDown' || event.key === 'PageDown';
+      if (!isUp && !isDown) return;
 
       const index = rows.findIndex((row) => row[idField] === selected[idField]);
       if (index === -1) return;
 
-      const nextIndex = event.key === 'ArrowUp' ? index - 1 : index + 1;
-      if (nextIndex < 0 || nextIndex >= rows.length) return;
+      const step = event.key === 'PageUp' || event.key === 'PageDown'
+        ? getVisibleRowJumpSize()
+        : 1;
+      const nextIndex = isUp ? index - step : index + step;
+      const clampedIndex = Math.max(0, Math.min(rows.length - 1, nextIndex));
+      if (clampedIndex === index) return;
 
       event.preventDefault();
-      const nextRow = rows[nextIndex];
+      const nextRow = rows[clampedIndex];
       onChange(nextRow);
       scrollResultRowIntoView(nextRow[idField]);
     }
@@ -232,6 +282,43 @@ function useGridRowNavigation({ rows, selected, onChange, idField, enabled = tru
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [rows, selected, onChange, idField, enabled]);
+}
+
+function useGridPageNavigation({
+  offset,
+  limit,
+  total,
+  loading,
+  onPrevPage,
+  onNextPage,
+  enabled = true
+}) {
+  useEffect(() => {
+    if (!enabled) return;
+
+    function handleKeyDown(event) {
+      const isPrev = event.key === 'ArrowLeft';
+      const isNext = event.key === 'ArrowRight';
+      if (!isPrev && !isNext) return;
+      if (isEditableTarget(event.target)) return;
+      if (isNestedPopoutOpen()) return;
+      if (loading) return;
+
+      if (isPrev && offset > 0) {
+        event.preventDefault();
+        onPrevPage();
+        return;
+      }
+
+      if (isNext && offset + limit < total) {
+        event.preventDefault();
+        onNextPage();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [offset, limit, total, loading, onPrevPage, onNextPage, enabled]);
 }
 
 function useModalEscape({
@@ -574,7 +661,7 @@ function SpellsPage({ onNavigate }) {
 
   async function fetchLookups() {
     const res = await fetch('/api/spell-lookups');
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
@@ -584,7 +671,7 @@ function SpellsPage({ onNavigate }) {
     try {
       const qs = buildQuery(filters, newOffset, sortBy, sortDir);
       const res = await fetch(`/api/spells?${qs}`);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
       setTotal(data.total || 0);
@@ -650,6 +737,14 @@ function SpellsPage({ onNavigate }) {
     setSelected(row);
   }, []);
 
+  const goPrevPage = useCallback(() => {
+    searchRef.current?.(Math.max(0, offset - limit));
+  }, [offset, limit]);
+
+  const goNextPage = useCallback(() => {
+    searchRef.current?.(offset + limit);
+  }, [offset, limit]);
+
   useModalRowNavigation({
     rows,
     activeRecord: selectedSpell,
@@ -662,6 +757,16 @@ function SpellsPage({ onNavigate }) {
     selected,
     idField: 'SpellId',
     onChange: handleGridRowChange,
+    enabled: !selectedSpell
+  });
+
+  useGridPageNavigation({
+    offset,
+    limit,
+    total,
+    loading,
+    onPrevPage: goPrevPage,
+    onNextPage: goNextPage,
     enabled: !selectedSpell
   });
 
@@ -797,7 +902,7 @@ function FeatsPage({ onNavigate }) {
 
   async function fetchLookups() {
     const res = await fetch('/api/feat-lookups');
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
@@ -807,7 +912,7 @@ function FeatsPage({ onNavigate }) {
     try {
       const qs = buildQuery(filters, newOffset, sortBy, sortDir);
       const res = await fetch(`/api/feats?${qs}`);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
       setTotal(data.total || 0);
@@ -873,6 +978,14 @@ function FeatsPage({ onNavigate }) {
     setSelected(row);
   }, []);
 
+  const goPrevPage = useCallback(() => {
+    searchRef.current?.(Math.max(0, offset - limit));
+  }, [offset, limit]);
+
+  const goNextPage = useCallback(() => {
+    searchRef.current?.(offset + limit);
+  }, [offset, limit]);
+
   useModalRowNavigation({
     rows,
     activeRecord: selectedFeat,
@@ -885,6 +998,16 @@ function FeatsPage({ onNavigate }) {
     selected,
     idField: 'FeatId',
     onChange: handleGridRowChange,
+    enabled: !selectedFeat
+  });
+
+  useGridPageNavigation({
+    offset,
+    limit,
+    total,
+    loading,
+    onPrevPage: goPrevPage,
+    onNextPage: goNextPage,
     enabled: !selectedFeat
   });
 
@@ -1019,7 +1142,7 @@ function EquipmentPage({ onNavigate }) {
 
   async function fetchLookups() {
     const res = await fetch('/api/equipment-lookups');
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
@@ -1029,7 +1152,7 @@ function EquipmentPage({ onNavigate }) {
     try {
       const qs = buildQuery(filters, newOffset, sortBy, sortDir);
       const res = await fetch(`/api/equipment?${qs}`);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
       setTotal(data.total || 0);
@@ -1095,6 +1218,14 @@ function EquipmentPage({ onNavigate }) {
     setSelected(row);
   }, []);
 
+  const goPrevPage = useCallback(() => {
+    searchRef.current?.(Math.max(0, offset - limit));
+  }, [offset, limit]);
+
+  const goNextPage = useCallback(() => {
+    searchRef.current?.(offset + limit);
+  }, [offset, limit]);
+
   useModalRowNavigation({
     rows,
     activeRecord: selectedEquipment,
@@ -1107,6 +1238,16 @@ function EquipmentPage({ onNavigate }) {
     selected,
     idField: 'EquipmentId',
     onChange: handleGridRowChange,
+    enabled: !selectedEquipment
+  });
+
+  useGridPageNavigation({
+    offset,
+    limit,
+    total,
+    loading,
+    onPrevPage: goPrevPage,
+    onNextPage: goNextPage,
     enabled: !selectedEquipment
   });
 
@@ -1262,7 +1403,7 @@ function CreatureSearchPage({
 
   async function fetchLookups() {
     const res = await fetch('/api/lookups');
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
@@ -1272,7 +1413,7 @@ function CreatureSearchPage({
     try {
       const qs = buildQuery(filters, newOffset, sortBy, sortDir);
       const res = await fetch(`/api/${apiPath}?${qs}`);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
       setTotal(data.total || 0);
@@ -1338,6 +1479,14 @@ function CreatureSearchPage({
     setSelected(row);
   }, []);
 
+  const goPrevPage = useCallback(() => {
+    searchRef.current?.(Math.max(0, offset - limit));
+  }, [offset, limit]);
+
+  const goNextPage = useCallback(() => {
+    searchRef.current?.(offset + limit);
+  }, [offset, limit]);
+
   useModalRowNavigation({
     rows,
     activeRecord: selectedMonster,
@@ -1350,6 +1499,16 @@ function CreatureSearchPage({
     selected,
     idField: 'MonsterId',
     onChange: handleGridRowChange,
+    enabled: !selectedMonster
+  });
+
+  useGridPageNavigation({
+    offset,
+    limit,
+    total,
+    loading,
+    onPrevPage: goPrevPage,
+    onNextPage: goNextPage,
     enabled: !selectedMonster
   });
 
@@ -1524,7 +1683,16 @@ function FeatDetailCard({ feat }) {
           <div className="muted">Level {feat.Level ?? '?'} {feat.FeatType || ''} {feat.Rarity || ''}</div>
           <div className="chips">
             {feat.Traits && <span>{feat.Traits}</span>}
-            {feat.SourceBook && <span>{feat.SourceBook}</span>}
+            {feat.SourceBook && (
+              <span>
+                <SourceBookLinks
+                  sourceBook={feat.SourceBook}
+                  sourcePurchaseUrl={feat.SourcePurchaseURL}
+                  linkClassName="detail-link"
+                  showPage={false}
+                />
+              </span>
+            )}
             {feat.PFS && <span>{feat.PFS}</span>}
             {feat.IsStandardAncestryFeat && <span>Standard ancestry</span>}
           </div>
@@ -1532,7 +1700,19 @@ function FeatDetailCard({ feat }) {
         </div>
       </div>
       <div className="detailBlock"><b>Summary</b><p>{feat.Summary || '-'}</p></div>
-      <div className="detailBlock"><b>Source</b><p>{feat.SourceBook || '-'} {feat.SourcePage ? `pg. ${feat.SourcePage}` : ''}</p></div>
+      <div className="detailBlock">
+        <b>Source</b>
+        <p>
+          {feat.SourceBook ? (
+            <SourceBookLinks
+              sourceBook={feat.SourceBook}
+              sourcePurchaseUrl={feat.SourcePurchaseURL}
+              sourcePage={feat.SourcePage}
+              linkClassName="detail-link"
+            />
+          ) : '-'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1548,7 +1728,16 @@ function EquipmentDetailCard({ item }) {
           <div className="chips">
             {item.Traits && <span>{item.Traits}</span>}
             {item.ItemCategory && <span>{item.ItemCategory}</span>}
-            {item.SourceBook && <span>{item.SourceBook}</span>}
+            {item.SourceBook && (
+              <span>
+                <SourceBookLinks
+                  sourceBook={item.SourceBook}
+                  sourcePurchaseUrl={item.SourcePurchaseURL}
+                  linkClassName="detail-link"
+                  showPage={false}
+                />
+              </span>
+            )}
           </div>
           {item.AonUrl && <a href={item.AonUrl} target="_blank" rel="noreferrer">Open AoN <ExternalLink size={13} /></a>}
         </div>
@@ -1560,7 +1749,19 @@ function EquipmentDetailCard({ item }) {
         <b>Weapon</b> {item.WeaponCategory || '-'} <b>Armor</b> {item.ArmorCategory || '-'}
       </div>
       <div className="detailBlock"><b>Summary</b><p>{item.Summary || '-'}</p></div>
-      <div className="detailBlock"><b>Source</b><p>{item.SourceBook || '-'} {item.SourcePage ? `pg. ${item.SourcePage}` : ''}</p></div>
+      <div className="detailBlock">
+        <b>Source</b>
+        <p>
+          {item.SourceBook ? (
+            <SourceBookLinks
+              sourceBook={item.SourceBook}
+              sourcePurchaseUrl={item.SourcePurchaseURL}
+              sourcePage={item.SourcePage}
+              linkClassName="detail-link"
+            />
+          ) : '-'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1576,7 +1777,16 @@ function SpellDetailCard({ spell }) {
           <div className="chips">
             {spell.Traditions && <span>{spell.Traditions}</span>}
             {spell.Traits && <span>{spell.Traits}</span>}
-            {spell.SourceBook && <span>{spell.SourceBook}</span>}
+            {spell.SourceBook && (
+              <span>
+                <SourceBookLinks
+                  sourceBook={spell.SourceBook}
+                  sourcePurchaseUrl={spell.SourcePurchaseURL}
+                  linkClassName="detail-link"
+                  showPage={false}
+                />
+              </span>
+            )}
           </div>
           {spell.AonUrl && <a href={spell.AonUrl} target="_blank" rel="noreferrer">Open AoN <ExternalLink size={13} /></a>}
         </div>
@@ -1589,7 +1799,19 @@ function SpellDetailCard({ spell }) {
       </div>
       <div className="detailBlock"><b>Summary</b><p>{spell.Summary || '-'}</p></div>
       <div className="detailBlock"><b>Heighten</b><p>{spell.Heighten || '-'}</p></div>
-      <div className="detailBlock"><b>Source</b><p>{spell.SourceBook || '-'} {spell.SourcePage ? `pg. ${spell.SourcePage}` : ''}</p></div>
+      <div className="detailBlock">
+        <b>Source</b>
+        <p>
+          {spell.SourceBook ? (
+            <SourceBookLinks
+              sourceBook={spell.SourceBook}
+              sourcePurchaseUrl={spell.SourcePurchaseURL}
+              sourcePage={spell.SourcePage}
+              linkClassName="detail-link"
+            />
+          ) : '-'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1617,7 +1839,19 @@ function DetailCard({ monster }) {
       <div className="statLine"><b>Perception</b> {monster.Perception ?? '-'} <b>Speed</b> {monster.Speed || '-'}</div>
       <div className="detailBlock"><b>Languages</b><p>{monster.Languages || '-'}</p></div>
       <div className="detailBlock"><b>Skills</b><p>{monster.Skills || '-'}</p></div>
-      <div className="detailBlock"><b>Source</b><p>{monster.SourceBook || '-'} {monster.SourcePage ? `pg. ${monster.SourcePage}` : ''}</p></div>
+      <div className="detailBlock">
+        <b>Source</b>
+        <p>
+          {monster.SourceBook ? (
+            <SourceBookLinks
+              sourceBook={monster.SourceBook}
+              sourcePurchaseUrl={monster.SourcePurchaseURL}
+              sourcePage={monster.SourcePage}
+              linkClassName="detail-link"
+            />
+          ) : '-'}
+        </p>
+      </div>
     </div>
   );
 }
@@ -1625,8 +1859,53 @@ function DetailCard({ monster }) {
 function isUrlField(key, value) {
   return (
     key.toLowerCase().includes('url') &&
+    key !== 'SourcePurchaseURL' &&
     typeof value === 'string' &&
     value.startsWith('http')
+  );
+}
+
+function SourceBookLinks({
+  sourceBook,
+  sourcePurchaseUrl,
+  sourcePage,
+  className = '',
+  linkClassName = 'modal-link',
+  showPage = true
+}) {
+  if (!sourceBook) return showPage && sourcePage ? `pg. ${sourcePage}` : null;
+
+  const names = String(sourceBook).split(',').map((part) => part.trim()).filter(Boolean);
+  const urls = sourcePurchaseUrl
+    ? String(sourcePurchaseUrl).split(',').map((part) => part.trim())
+    : [];
+
+  return (
+    <span className={className}>
+      {names.map((name, index) => {
+        const url = urls[index] || '';
+        const separator = index > 0 ? ', ' : '';
+
+        if (url.startsWith('http')) {
+          return (
+            <span key={`${name}-${index}`}>
+              {separator}
+              <a href={url} target="_blank" rel="noreferrer" className={linkClassName}>
+                {name}
+              </a>
+            </span>
+          );
+        }
+
+        return (
+          <span key={`${name}-${index}`}>
+            {separator}
+            {name}
+          </span>
+        );
+      })}
+      {showPage && sourcePage ? ` pg. ${sourcePage}` : ''}
+    </span>
   );
 }
 
@@ -1806,7 +2085,18 @@ function ImagePopoutModal({ imageUrl, alt = 'Art', onClose }) {
   );
 }
 
-function renderModalValue(key, value) {
+function renderModalValue(key, value, record) {
+  if (key === 'SourceBook') {
+    return (
+      <SourceBookLinks
+        sourceBook={value}
+        sourcePurchaseUrl={record?.SourcePurchaseURL}
+        sourcePage={record?.SourcePage}
+        showPage={false}
+      />
+    );
+  }
+
   if (value === null || value === undefined) return '';
 
   if (isUrlField(key, value)) {
@@ -1826,7 +2116,9 @@ function renderModalValue(key, value) {
 
 function splitEntityFields(record) {
   const rawMD = getCaseInsensitiveField(record, 'RawMD') ?? '';
-  const normalFields = Object.entries(record).filter(([key]) => !isRawField(key));
+  const normalFields = Object.entries(record).filter(([key]) => (
+    !isRawField(key) && key !== 'SourcePurchaseURL'
+  ));
   const rawFields = Object.entries(record).filter(([key]) => (
     isRawField(key) && key.toLowerCase() !== 'rawmd'
   ));
@@ -1887,7 +2179,7 @@ function ModalMdSection({ rawMD, onPopout }) {
   );
 }
 
-function ModalAllFieldsSection({ title, normalFields }) {
+function ModalAllFieldsSection({ title, normalFields, record }) {
   return (
     <div className="modal-section">
       <h3>{title}</h3>
@@ -1895,7 +2187,7 @@ function ModalAllFieldsSection({ title, normalFields }) {
         {normalFields.map(([key, value]) => (
           <div className="modal-field" key={key}>
             <div className="modal-field-label">{key}</div>
-            <div className="modal-field-value">{renderModalValue(key, value)}</div>
+            <div className="modal-field-value">{renderModalValue(key, value, record)}</div>
           </div>
         ))}
       </div>
@@ -1990,7 +2282,16 @@ function MonsterModal({ monster, onClose }) {
 
               <div className="modal-pill-row">
                 {monster.Family && <span className="modal-pill">{monster.Family}</span>}
-                {monster.SourceBook && <span className="modal-pill">{monster.SourceBook}</span>}
+                {monster.SourceBook && (
+                  <span className="modal-pill">
+                    <SourceBookLinks
+                      sourceBook={monster.SourceBook}
+                      sourcePurchaseUrl={monster.SourcePurchaseURL}
+                      linkClassName="modal-pill-link"
+                      showPage={false}
+                    />
+                  </span>
+                )}
                 {monster.IsNPC && <span className="modal-pill">NPC</span>}
                 {monster.IsUnique && <span className="modal-pill">Unique</span>}
               </div>
@@ -2022,7 +2323,7 @@ function MonsterModal({ monster, onClose }) {
           </div>
         </div>
 
-        <ModalAllFieldsSection title="All Monster Fields" normalFields={normalFields} />
+        <ModalAllFieldsSection title="All Monster Fields" normalFields={normalFields} record={monster} />
         <ModalMdSection rawMD={rawMD} onPopout={() => setIsMDPopoutOpen(true)} />
         <ModalRawFieldsSection rawFields={rawFields} />
 
@@ -2091,7 +2392,16 @@ function SpellModal({ spell, onClose }) {
               <div className="modal-pill-row">
                 {spell.Traditions && <span className="modal-pill">{spell.Traditions}</span>}
                 {spell.Traits && <span className="modal-pill">{spell.Traits}</span>}
-                {spell.SourceBook && <span className="modal-pill">{spell.SourceBook}</span>}
+                {spell.SourceBook && (
+                  <span className="modal-pill">
+                    <SourceBookLinks
+                      sourceBook={spell.SourceBook}
+                      sourcePurchaseUrl={spell.SourcePurchaseURL}
+                      linkClassName="modal-pill-link"
+                      showPage={false}
+                    />
+                  </span>
+                )}
               </div>
 
               {spell.AonUrl && (
@@ -2121,7 +2431,7 @@ function SpellModal({ spell, onClose }) {
           </div>
         </div>
 
-        <ModalAllFieldsSection title="All Spell Fields" normalFields={normalFields} />
+        <ModalAllFieldsSection title="All Spell Fields" normalFields={normalFields} record={spell} />
         <ModalMdSection rawMD={bodyMD} onPopout={() => setIsMDPopoutOpen(true)} />
         <ModalRawFieldsSection rawFields={rawFields} />
 
@@ -2189,7 +2499,16 @@ function FeatModal({ feat, onClose }) {
 
               <div className="modal-pill-row">
                 {feat.Traits && <span className="modal-pill">{feat.Traits}</span>}
-                {feat.SourceBook && <span className="modal-pill">{feat.SourceBook}</span>}
+                {feat.SourceBook && (
+                  <span className="modal-pill">
+                    <SourceBookLinks
+                      sourceBook={feat.SourceBook}
+                      sourcePurchaseUrl={feat.SourcePurchaseURL}
+                      linkClassName="modal-pill-link"
+                      showPage={false}
+                    />
+                  </span>
+                )}
                 {feat.PFS && <span className="modal-pill">{feat.PFS}</span>}
                 {feat.IsStandardAncestryFeat && <span className="modal-pill">Standard ancestry</span>}
               </div>
@@ -2215,13 +2534,13 @@ function FeatModal({ feat, onClose }) {
             {['Level','FeatType','Rarity','PFS','SourceBook','SourcePage'].map((key) => (
               <div key={key} className="modal-stat">
                 <span className="modal-stat-label">{key}</span>
-                <span className="modal-stat-value">{renderModalValue(key, feat[key]) || '-'}</span>
+                <span className="modal-stat-value">{renderModalValue(key, feat[key], feat) || '-'}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <ModalAllFieldsSection title="All Feat Fields" normalFields={normalFields} />
+        <ModalAllFieldsSection title="All Feat Fields" normalFields={normalFields} record={feat} />
         <ModalMdSection rawMD={bodyMD} onPopout={() => setIsMDPopoutOpen(true)} />
         <ModalRawFieldsSection rawFields={rawFields} />
 
@@ -2291,7 +2610,16 @@ function EquipmentModal({ item, onClose }) {
                 {item.Traits && <span className="modal-pill">{item.Traits}</span>}
                 {item.ItemCategory && <span className="modal-pill">{item.ItemCategory}</span>}
                 {item.ItemSubcategory && <span className="modal-pill">{item.ItemSubcategory}</span>}
-                {item.SourceBook && <span className="modal-pill">{item.SourceBook}</span>}
+                {item.SourceBook && (
+                  <span className="modal-pill">
+                    <SourceBookLinks
+                      sourceBook={item.SourceBook}
+                      sourcePurchaseUrl={item.SourcePurchaseURL}
+                      linkClassName="modal-pill-link"
+                      showPage={false}
+                    />
+                  </span>
+                )}
               </div>
 
               {item.AonUrl && (
@@ -2315,13 +2643,13 @@ function EquipmentModal({ item, onClose }) {
             {['PriceText','BulkText','WeaponCategory','WeaponGroup','Damage','ArmorCategory','AC','Hardness','HP','PFS','SourceBook','SourcePage'].map((key) => (
               <div key={key} className="modal-stat">
                 <span className="modal-stat-label">{key}</span>
-                <span className="modal-stat-value">{item[key] ?? '-'}</span>
+                <span className="modal-stat-value">{renderModalValue(key, item[key], item) || '-'}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <ModalAllFieldsSection title="All Equipment Fields" normalFields={normalFields} />
+        <ModalAllFieldsSection title="All Equipment Fields" normalFields={normalFields} record={item} />
         <ModalMdSection rawMD={bodyMD} onPopout={() => setIsMDPopoutOpen(true)} />
         <ModalRawFieldsSection rawFields={rawFields} />
 

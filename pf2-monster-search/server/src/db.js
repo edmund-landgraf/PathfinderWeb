@@ -4,7 +4,12 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const trusted =
-  String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() === 'true';
+  String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() === 'true' ||
+  (
+    process.platform === 'win32' &&
+    !String(process.env.SQL_USER || '').trim() &&
+    String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() !== 'false'
+  );
 
 let config;
 
@@ -18,6 +23,8 @@ if (trusted) {
       `TrustServerCertificate=Yes;`,
 
     driver: 'msnodesqlv8',
+
+    requestTimeout: Number(process.env.SQL_REQUEST_TIMEOUT_MS || 120000),
 
     options: {
       trustedConnection: true,
@@ -39,6 +46,8 @@ else {
 
     user: process.env.SQL_USER,
     password: process.env.SQL_PASSWORD,
+
+    requestTimeout: Number(process.env.SQL_REQUEST_TIMEOUT_MS || 120000),
 
     options: {
       encrypt:
@@ -68,7 +77,10 @@ export async function getPool() {
         : `Authentication: SQL Login (${process.env.SQL_USER})`
     );
 
-    poolPromise = sql.connect(config);
+    poolPromise = sql.connect(config).catch((err) => {
+      poolPromise = null;
+      throw err;
+    });
   }
 
   return poolPromise;

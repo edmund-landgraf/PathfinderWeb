@@ -91,7 +91,7 @@ function logError(err) {
   console.error('\n' + '!'.repeat(100));
   console.error('ERROR');
   console.error('!'.repeat(100));
-  console.error('Message:', err.message);
+  console.error('Message:', getErrorMessage(err));
   console.error('Name:', err.name);
   console.error('Code:', err.code);
   console.error('Number:', err.number);
@@ -110,6 +110,135 @@ function logError(err) {
   }
 
   console.error('Stack:', err.stack);
+}
+
+function getErrorMessage(err) {
+  if (!err) return 'Unknown error';
+
+  const candidates = [
+    err.message,
+    err.originalError?.message,
+    err.originalError?.info?.message,
+    err.precedingErrors?.[0]?.message,
+    err.info?.message,
+    err.code
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate && candidate !== '[object Object]') {
+      return candidate;
+    }
+  }
+
+  if (typeof err.originalError === 'string' && err.originalError) {
+    return err.originalError;
+  }
+
+  if (typeof err.message === 'object' && err.message) {
+    try {
+      return JSON.stringify(err.message);
+    } catch {
+      return 'Database error';
+    }
+  }
+
+  if (
+    !String(process.env.SQL_USER || '').trim() &&
+    String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() !== 'true' &&
+    process.platform !== 'win32'
+  ) {
+    return 'Database login failed. Set SQL_TRUSTED_CONNECTION=true or provide SQL_USER and SQL_PASSWORD in server/.env';
+  }
+
+  try {
+    const serialized = JSON.stringify(err, Object.getOwnPropertyNames(err));
+    if (serialized && serialized !== '{}' && serialized !== '[object Object]') {
+      return serialized;
+    }
+  } catch {
+    // fall through
+  }
+
+  return 'Database error';
+}
+
+let sourcePurchaseUrlByNamePromise;
+
+async function getSourcePurchaseUrlMap(pool) {
+  if (!sourcePurchaseUrlByNamePromise) {
+    sourcePurchaseUrlByNamePromise = pool.request().query(`
+      SELECT sb.Name, sbp.StoreUrl
+      FROM pf2.SourceBook sb
+      INNER JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+    `).then((result) => {
+      const map = new Map();
+      for (const row of result.recordset || []) {
+        map.set(row.Name, row.StoreUrl);
+      }
+      return map;
+    }).catch((err) => {
+      sourcePurchaseUrlByNamePromise = null;
+      throw err;
+    });
+  }
+
+  return sourcePurchaseUrlByNamePromise;
+}
+
+function buildSourcePurchaseUrl(sourceBook, urlMap) {
+  if (!sourceBook) return null;
+
+  const names = String(sourceBook).split(',').map((part) => part.trim()).filter(Boolean);
+  const urls = names.map((name) => urlMap.get(name) || '');
+
+  if (urls.every((url) => !url)) return null;
+  return urls.join(', ');
+}
+
+async function attachSourcePurchaseUrls(pool, rows) {
+  if (!rows.length) return rows;
+
+  const urlMap = await getSourcePurchaseUrlMap(pool);
+  for (const row of rows) {
+    row.SourcePurchaseURL = buildSourcePurchaseUrl(row.SourceBook, urlMap);
+  }
+
+  return rows;
+}
+
+function sourcesOuterApplySql(entityAlias, linkTable, entityIdColumn) {
+  const linkSortColumn = {
+    EquipmentSourceLink: 'EquipmentSourceLinkId',
+    FeatSourceLink: 'FeatSourceLinkId',
+    SpellSourceLink: 'SpellSourceLinkId'
+  }[linkTable];
+
+  return `
+      OUTER APPLY (
+        SELECT
+          STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook,
+          NULLIF(
+            STRING_AGG(CAST(ISNULL(src.StoreUrl, '') AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name),
+            ''
+          ) AS SourcePurchaseURL
+        FROM (
+          SELECT sourceRows.Name, MAX(sourceRows.StoreUrl) AS StoreUrl, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT sb.Name, sbp.StoreUrl, 0 AS SortOrder
+            WHERE sb.Name IS NOT NULL
+            UNION ALL
+            SELECT lsb.Name, lsbp.StoreUrl, link.${linkSortColumn} AS SortOrder
+            FROM pf2.${linkTable} link
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = link.SourceBookId
+            LEFT JOIN pf2.SourceBookPurchase lsbp
+              ON lsbp.SourceBookPurchaseId = lsb.SourcePurchaseID
+            WHERE link.${entityIdColumn} = ${entityAlias}.${entityIdColumn}
+          ) sourceRows
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources`;
 }
 
 function normalizeSortBy(value) {
@@ -307,6 +436,38 @@ function addBoolFilter(request, where, debugParams, column, paramName, value) {
   };
 }
 
+function addFullTextFilter(request, where, debugParams, {
+  paramName,
+  table,
+  idColumn,
+  columns,
+  value,
+  outerColumn
+}) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+
+  const clean = String(value).trim();
+  const ft = `"${clean.replace(/"/g, '""')}*"`;
+  const columnList = columns.join(', ');
+
+  request.input(paramName, sql.NVarChar(4000), ft);
+
+  where.push(`
+    ${outerColumn} IN (
+      SELECT ${idColumn}
+      FROM ${table}
+      WHERE CONTAINS((${columnList}), @${paramName})
+    )
+  `);
+
+  debugParams[paramName] = {
+    type: 'FullText',
+    value: ft,
+    table,
+    columns: columnList
+  };
+}
+
 app.get('/api/health', async (_req, res) => {
   const started = Date.now();
 
@@ -327,7 +488,7 @@ app.get('/api/health', async (_req, res) => {
     logError(err);
     res.status(500).json({
       ok: false,
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 });
@@ -375,7 +536,7 @@ app.get('/api/lookups', async (_req, res) => {
   } catch (err) {
     logError(err);
     res.status(500).json({
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 });
@@ -421,7 +582,7 @@ app.get('/api/spell-lookups', async (_req, res) => {
   } catch (err) {
     logError(err);
     res.status(500).json({
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 });
@@ -465,7 +626,7 @@ app.get('/api/feat-lookups', async (_req, res) => {
   } catch (err) {
     logError(err);
     res.status(500).json({
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 });
@@ -509,7 +670,7 @@ app.get('/api/equipment-lookups', async (_req, res) => {
   } catch (err) {
     logError(err);
     res.status(500).json({
-      error: err.message
+      error: getErrorMessage(err)
     });
   }
 });
@@ -568,28 +729,14 @@ app.get('/api/equipment', async (req, res) => {
       };
     }
 
-    if (req.query.text && String(req.query.text).trim() !== '') {
-      const clean = String(req.query.text).trim();
-      const sqlValue = `%${clean}%`;
-
-      request.input('text', sql.NVarChar(4000), sqlValue);
-      where.push(`
-        (
-          e.Name LIKE @text
-          OR e.Summary LIKE @text
-          OR e.RawText LIKE @text
-          OR e.BaseItemText LIKE @text
-          OR e.SpellText LIKE @text
-          OR e.StageText LIKE @text
-        )
-      `);
-      debugParams.text = {
-        type: 'NVarChar',
-        value: sqlValue,
-        original: clean,
-        columns: 'Name, Summary, RawText, BaseItemText, SpellText, StageText'
-      };
-    }
+    addFullTextFilter(request, where, debugParams, {
+      paramName: 'text',
+      table: 'pf2.Equipment',
+      idColumn: 'EquipmentId',
+      columns: ['Name', 'Summary', 'RawText', 'BaseItemText', 'SpellText', 'StageText'],
+      value: req.query.text,
+      outerColumn: 'e.EquipmentId'
+    });
 
     const rawLimit = Number(req.query.limit || 100);
     const rawOffset = Number(req.query.offset || 0);
@@ -620,6 +767,8 @@ app.get('/api/equipment', async (req, res) => {
         ON r.RarityId = e.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = e.SourceBookId
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
       OUTER APPLY (
         SELECT STRING_AGG(t.Name, ', ') AS Traits
         FROM pf2.EquipmentTrait et
@@ -627,23 +776,7 @@ app.get('/api/equipment', async (req, res) => {
           ON t.TraitId = et.TraitId
         WHERE et.EquipmentId = e.EquipmentId
       ) traits
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, esl.EquipmentSourceLinkId AS SortOrder
-            FROM pf2.EquipmentSourceLink esl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = esl.SourceBookId
-            WHERE esl.EquipmentId = e.EquipmentId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      ${sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')}
     `;
 
     const countFromSql = `
@@ -652,23 +785,9 @@ app.get('/api/equipment', async (req, res) => {
         ON r.RarityId = e.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = e.SourceBookId
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, esl.EquipmentSourceLinkId AS SortOrder
-            FROM pf2.EquipmentSourceLink esl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = esl.SourceBookId
-            WHERE esl.EquipmentId = e.EquipmentId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+      ${sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -687,6 +806,7 @@ app.get('/api/equipment', async (req, res) => {
         e.ItemSubcategory,
         r.Name AS Rarity,
         sources.SourceBook,
+        sources.SourcePurchaseURL,
         e.SourcePage,
         traits.Traits,
         e.PFS,
@@ -768,7 +888,7 @@ app.get('/api/equipment', async (req, res) => {
     logError(err);
 
     res.status(500).json({
-      error: err.message,
+      error: getErrorMessage(err),
       debug: DEBUG_SQL
         ? {
             query: req.query
@@ -821,25 +941,14 @@ app.get('/api/feats', async (req, res) => {
       };
     }
 
-    if (req.query.text && String(req.query.text).trim() !== '') {
-      const clean = String(req.query.text).trim();
-      const sqlValue = `%${clean}%`;
-
-      request.input('text', sql.NVarChar(4000), sqlValue);
-      where.push(`
-        (
-          f.Name LIKE @text
-          OR f.Summary LIKE @text
-          OR f.RawText LIKE @text
-        )
-      `);
-      debugParams.text = {
-        type: 'NVarChar',
-        value: sqlValue,
-        original: clean,
-        columns: 'Name, Summary, RawText'
-      };
-    }
+    addFullTextFilter(request, where, debugParams, {
+      paramName: 'text',
+      table: 'pf2.Feat',
+      idColumn: 'FeatId',
+      columns: ['Name', 'Summary', 'RawText'],
+      value: req.query.text,
+      outerColumn: 'f.FeatId'
+    });
 
     const rawLimit = Number(req.query.limit || 100);
     const rawOffset = Number(req.query.offset || 0);
@@ -870,6 +979,8 @@ app.get('/api/feats', async (req, res) => {
         ON r.RarityId = f.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = f.SourceBookId
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
       OUTER APPLY (
         SELECT STRING_AGG(t.Name, ', ') AS Traits
         FROM pf2.FeatTrait ft
@@ -877,23 +988,7 @@ app.get('/api/feats', async (req, res) => {
           ON t.TraitId = ft.TraitId
         WHERE ft.FeatId = f.FeatId
       ) traits
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, fsl.FeatSourceLinkId AS SortOrder
-            FROM pf2.FeatSourceLink fsl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = fsl.SourceBookId
-            WHERE fsl.FeatId = f.FeatId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      ${sourcesOuterApplySql('f', 'FeatSourceLink', 'FeatId')}
     `;
 
     const countFromSql = `
@@ -902,23 +997,9 @@ app.get('/api/feats', async (req, res) => {
         ON r.RarityId = f.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = f.SourceBookId
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, fsl.FeatSourceLinkId AS SortOrder
-            FROM pf2.FeatSourceLink fsl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = fsl.SourceBookId
-            WHERE fsl.FeatId = f.FeatId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+      ${sourcesOuterApplySql('f', 'FeatSourceLink', 'FeatId')}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -933,6 +1014,7 @@ app.get('/api/feats', async (req, res) => {
         f.FeatType,
         r.Name AS Rarity,
         sources.SourceBook,
+        sources.SourcePurchaseURL,
         f.SourcePage,
         traits.Traits,
         f.PFS,
@@ -993,7 +1075,7 @@ app.get('/api/feats', async (req, res) => {
     logError(err);
 
     res.status(500).json({
-      error: err.message,
+      error: getErrorMessage(err),
       debug: DEBUG_SQL
         ? {
             query: req.query
@@ -1068,25 +1150,14 @@ app.get('/api/spells', async (req, res) => {
       };
     }
 
-    if (req.query.text && String(req.query.text).trim() !== '') {
-      const clean = String(req.query.text).trim();
-      const sqlValue = `%${clean}%`;
-
-      request.input('text', sql.NVarChar(4000), sqlValue);
-      where.push(`
-        (
-          s.Name LIKE @text
-          OR s.Summary LIKE @text
-          OR s.RawText LIKE @text
-        )
-      `);
-      debugParams.text = {
-        type: 'NVarChar',
-        value: sqlValue,
-        original: clean,
-        columns: 'Name, Summary, RawText'
-      };
-    }
+    addFullTextFilter(request, where, debugParams, {
+      paramName: 'text',
+      table: 'pf2.Spell',
+      idColumn: 'SpellId',
+      columns: ['Name', 'Summary', 'RawText'],
+      value: req.query.text,
+      outerColumn: 's.SpellId'
+    });
 
     const rawLimit = Number(req.query.limit || 100);
     const rawOffset = Number(req.query.offset || 0);
@@ -1117,6 +1188,8 @@ app.get('/api/spells', async (req, res) => {
         ON r.RarityId = s.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = s.SourceBookId
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
       OUTER APPLY (
         SELECT STRING_AGG(tr.Name, ', ') AS Traditions
         FROM pf2.SpellTradition st
@@ -1131,23 +1204,7 @@ app.get('/api/spells', async (req, res) => {
           ON t.TraitId = st.TraitId
         WHERE st.SpellId = s.SpellId
       ) traits
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, ssl.SpellSourceLinkId AS SortOrder
-            FROM pf2.SpellSourceLink ssl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = ssl.SourceBookId
-            WHERE ssl.SpellId = s.SpellId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      ${sourcesOuterApplySql('s', 'SpellSourceLink', 'SpellId')}
     `;
 
     const countFromSql = `
@@ -1156,23 +1213,9 @@ app.get('/api/spells', async (req, res) => {
         ON r.RarityId = s.RarityId
       LEFT JOIN pf2.SourceBook sb
         ON sb.SourceBookId = s.SourceBookId
-      OUTER APPLY (
-        SELECT STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook
-        FROM (
-          SELECT sourceRows.Name, MIN(sourceRows.SortOrder) AS SortOrder
-          FROM (
-            SELECT sb.Name, 0 AS SortOrder
-            WHERE sb.Name IS NOT NULL
-            UNION ALL
-            SELECT lsb.Name, ssl.SpellSourceLinkId AS SortOrder
-            FROM pf2.SpellSourceLink ssl
-            INNER JOIN pf2.SourceBook lsb
-              ON lsb.SourceBookId = ssl.SourceBookId
-            WHERE ssl.SpellId = s.SpellId
-          ) sourceRows
-          GROUP BY sourceRows.Name
-        ) src
-      ) sources
+      LEFT JOIN pf2.SourceBookPurchase sbp
+        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+      ${sourcesOuterApplySql('s', 'SpellSourceLink', 'SpellId')}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -1187,6 +1230,7 @@ app.get('/api/spells', async (req, res) => {
         s.SpellType,
         r.Name AS Rarity,
         sources.SourceBook,
+        sources.SourcePurchaseURL,
         s.SourcePage,
         traditions.Traditions,
         traits.Traits,
@@ -1260,7 +1304,7 @@ app.get('/api/spells', async (req, res) => {
     logError(err);
 
     res.status(500).json({
-      error: err.message,
+      error: getErrorMessage(err),
       debug: DEBUG_SQL
         ? {
             query: req.query
@@ -1294,27 +1338,14 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     addStringFilter(request, where, debugParams, 'Family', 'family', req.query.family);
     addStringFilter(request, where, debugParams, 'SourceBook', 'sourceBook', req.query.sourceBook);
 
-    if (req.query.text && String(req.query.text).trim() !== '') {
-      const clean = String(req.query.text).trim();
-      const ft = `"${clean}*"`;
-
-      request.input('text', sql.NVarChar(4000), ft);
-
-      where.push(`
-        MonsterId IN (
-          SELECT MonsterId
-          FROM pf2.Monster
-          WHERE CONTAINS((Name, RawText), @text)
-        )
-      `);
-
-      debugParams.text = {
-        type: 'FullText',
-        value: ft,
-        table: 'pf2.Monster',
-        columns: 'Name, RawText'
-      };
-    }
+    addFullTextFilter(request, where, debugParams, {
+      paramName: 'text',
+      table: 'pf2.Monster',
+      idColumn: 'MonsterId',
+      columns: ['Name', 'RawText'],
+      value: req.query.text,
+      outerColumn: 'MonsterId'
+    });
     addStringFilter(request, where, debugParams, 'Languages', 'languages', req.query.languages);
     addStringFilter(request, where, debugParams, 'Skills', 'skills', req.query.skills);
     addStringFilter(request, where, debugParams, 'Senses', 'senses', req.query.senses);
@@ -1390,6 +1421,8 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
+    await attachSourcePurchaseUrls(pool, rows);
+
     logValue('Rows returned:', rows.length);
     logValue('Total:', total);
     logValue('Elapsed ms:', Date.now() - started);
@@ -1414,7 +1447,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     logError(err);
 
     res.status(500).json({
-      error: err.message,
+      error: getErrorMessage(err),
       debug: DEBUG_SQL
         ? {
             query: req.query
