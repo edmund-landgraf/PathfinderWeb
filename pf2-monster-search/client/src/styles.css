@@ -140,6 +140,8 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
 .homeSecondaryActions {
   display: flex;
   justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .homeUpdatesButton {
@@ -159,6 +161,154 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
   color: #f5d2aa;
   border-color: rgba(245,210,170,.35);
   background: rgba(245,210,170,.08);
+}
+
+.apiPage {
+  min-height: 100vh;
+}
+
+.apiTopbar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 16px;
+}
+
+.apiHomeButton {
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.apiShell {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 8px 16px 48px;
+}
+
+.apiIntro {
+  margin-bottom: 24px;
+}
+
+.apiIntro h1 {
+  margin: 0;
+  font-size: 34px;
+  color: #f5d2aa;
+}
+
+.apiIntro p,
+.apiStatus {
+  color: #cbbfb4;
+  font-size: 16px;
+}
+
+.apiError {
+  color: #ffb4a9;
+}
+
+.apiSplit {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.apiMaster {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 18px;
+  background: rgba(255,255,255,.04);
+  padding: 18px;
+}
+
+.apiMaster h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: #f5d2aa;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.apiMasterList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.apiMasterButton {
+  width: 100%;
+  min-height: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  background: rgba(0,0,0,.18);
+  border-color: rgba(255,255,255,.10);
+}
+
+.apiMasterButton:hover {
+  border-color: rgba(245,210,170,.28);
+  background: rgba(245,210,170,.06);
+}
+
+.apiMasterActive {
+  border-color: rgba(245,210,170,.42);
+  background: rgba(245,210,170,.10);
+}
+
+.apiMasterLabel {
+  font-size: 15px;
+  font-weight: 800;
+  color: #f5d2aa;
+}
+
+.apiMasterDescription {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #cbbfb4;
+}
+
+.apiDetail {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 18px;
+  background: rgba(255,255,255,.04);
+  padding: 18px;
+}
+
+.apiDetailHeader {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,.10);
+}
+
+.apiDetailHeader h2 {
+  margin: 0;
+  font-size: 22px;
+  color: #f5d2aa;
+}
+
+.yamlViewer {
+  margin: 0;
+  overflow: auto;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: #130f0c;
+  border: 1px solid rgba(245,210,170,.18);
+  color: #efe5d7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.yamlViewer code {
+  font: inherit;
 }
 
 .updatesPage {
@@ -842,6 +992,91 @@ tr { cursor: pointer; }
   flex: 0 0 auto;
 }
 
+.modal-md.apiMarkdownViewer,
+.yamlViewer.apiYamlViewer,
+.apiSwaggerViewer,
+.apiImageViewer {
+  max-height: calc(100vh - 220px);
+  min-height: calc(100vh - 220px);
+}
+
+.apiSwaggerViewer {
+  overflow: auto;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(245,210,170,.18);
+  color: #3b4151;
+}
+
+.apiSwaggerViewer .swagger-ui,
+.apiSwaggerViewer .swagger-ui .wrapper,
+.apiSwaggerViewer .swagger-ui section.models,
+.apiSwaggerViewer .swagger-ui .opblock-tag-section,
+.apiSwaggerViewer .swagger-ui table thead tr td,
+.apiSwaggerViewer .swagger-ui table thead tr th,
+.apiSwaggerViewer .swagger-ui .parameter__name,
+.apiSwaggerViewer .swagger-ui .parameter__type,
+.apiSwaggerViewer .swagger-ui .parameter__in,
+.apiSwaggerViewer .swagger-ui .response-col_status,
+.apiSwaggerViewer .swagger-ui .response-col_description,
+.apiSwaggerViewer .swagger-ui label {
+  color: #3b4151;
+}
+
+.apiSwaggerViewer .swagger-ui input[type="text"],
+.apiSwaggerViewer .swagger-ui input[type="password"],
+.apiSwaggerViewer .swagger-ui input[type="search"],
+.apiSwaggerViewer .swagger-ui input[type="email"],
+.apiSwaggerViewer .swagger-ui input[type="number"],
+.apiSwaggerViewer .swagger-ui textarea,
+.apiSwaggerViewer .swagger-ui select {
+  color: #3b4151;
+  background: #fff;
+  border: 1px solid #d8dde7;
+}
+
+.apiSwaggerViewer .swagger-ui input::placeholder,
+.apiSwaggerViewer .swagger-ui textarea::placeholder {
+  color: #939598;
+}
+
+.apiSwaggerViewer .swagger-ui .responses-inner,
+.apiSwaggerViewer .swagger-ui .response-col_description__inner,
+.apiSwaggerViewer .swagger-ui .highlight-code,
+.apiSwaggerViewer .swagger-ui .microlight,
+.apiSwaggerViewer .swagger-ui .curl-command,
+.apiSwaggerViewer .swagger-ui .opblock-body pre {
+  color: #3b4151;
+}
+
+.apiSwaggerViewer .swagger-ui .topbar {
+  display: none;
+}
+
+.apiSwaggerViewer .swagger-ui .information-container,
+.apiSwaggerViewer .swagger-ui .scheme-container {
+  margin: 0;
+  padding: 16px 20px;
+}
+
+.apiSwaggerViewer .swagger-ui .scheme-container {
+  box-shadow: none;
+}
+
+.apiImageViewer {
+  overflow: auto;
+  border-radius: 12px;
+  background: #130f0c;
+  border: 1px solid rgba(245,210,170,.18);
+  padding: 12px;
+}
+
+.apiImageViewer img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .modal-md-popout {
   max-height: none;
   min-height: 0;
@@ -886,6 +1121,7 @@ tr { cursor: pointer; }
   .searchPanel, .resultsPanel { overflow: visible; }
   .tableWrap { flex: none; min-height: auto; max-height: calc(100vh - 150px); }
   .updatesSplit { grid-template-columns: 1fr; }
+  .apiSplit { grid-template-columns: 1fr; }
   .modal-top-row { grid-template-columns: 1fr; }
   .modal-header { grid-template-columns: 1fr; }
   .modal-description-panel { padding-left: 0; border-left: 0; }

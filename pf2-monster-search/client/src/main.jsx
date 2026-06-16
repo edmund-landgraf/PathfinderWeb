@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
+import SwaggerUI from 'swagger-ui-react';
 import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound } from 'lucide-react';
 import remarkGfm from 'remark-gfm';
+import 'swagger-ui-react/swagger-ui.css';
 import {
   extractMarkdownDescriptionMonster,
   extractMarkdownDescriptionFeatsEquipSpells,
   extractMarkdownRemainderFeatsEquipSpells
 } from './markdownExtract.js';
 import { utilitiesUpdatesDescription, webUpdatesDescription } from './updatesDescriptions.js';
+import { imageLibraryEntries } from './imagesLibrary.js';
 import './styles.css';
 
 
@@ -427,6 +430,7 @@ function getCurrentPage() {
   if (path === '/monsters') return 'monsters';
   if (path === '/npcs') return 'npcs';
   if (path === '/updates') return 'updates';
+  if (path === '/api-docs') return 'api-docs';
   return 'home';
 }
 
@@ -471,6 +475,10 @@ function App() {
     return <UpdatesPage onNavigate={navigate} />;
   }
 
+  if (page === 'api-docs') {
+    return <ApiPage onNavigate={navigate} />;
+  }
+
   return <HomePage onNavigate={navigate} />;
 }
 
@@ -504,6 +512,9 @@ function HomePage({ onNavigate }) {
         <div className="homeSecondaryActions">
           <button className="homeUpdatesButton" onClick={() => onNavigate('/updates')}>
             Updates
+          </button>
+          <button className="homeUpdatesButton" onClick={() => onNavigate('/api-docs')}>
+            API
           </button>
         </div>
       </main>
@@ -582,6 +593,176 @@ function UpdatesPage({ onNavigate }) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+const API_DOC_SOURCES = [
+  {
+    id: 'md',
+    label: 'API.md',
+    description: 'Endpoint guide with curl examples',
+    path: '/schemas/API.md',
+    format: 'markdown'
+  },
+  {
+    id: 'yaml',
+    label: 'openapi.yaml',
+    description: 'OpenAPI 3.0 specification',
+    path: '/schemas/openapi.yaml',
+    format: 'yaml'
+  },
+  {
+    id: 'swagger',
+    label: 'Try it',
+    description: 'Interactive Swagger UI explorer',
+    path: '/schemas/openapi.yaml',
+    format: 'swagger'
+  },
+  ...imageLibraryEntries.map((image) => ({
+    id: image.id,
+    label: image.label,
+    description: image.description,
+    path: image.path,
+    alt: image.alt,
+    format: 'image'
+  }))
+];
+
+function ApiPage({ onNavigate }) {
+  const [selectedId, setSelectedId] = useState('md');
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const selected = API_DOC_SOURCES.find((source) => source.id === selectedId) || API_DOC_SOURCES[0];
+
+  useEffect(() => {
+    if (selected.format === 'swagger' || selected.format === 'image') {
+      setLoading(false);
+      setError('');
+      setContent('');
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setLoading(true);
+    setError('');
+
+    fetch(selected.path)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Could not load ${selected.label}.`);
+        return response.text();
+      })
+      .then((text) => {
+        if (!cancelled) setContent(text);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected.path, selected.label, selected.format]);
+
+  return (
+    <div className="app apiPage">
+      <header className="apiTopbar">
+        <button className="apiHomeButton" onClick={() => onNavigate('/')}>Home</button>
+      </header>
+
+      <main className="apiShell">
+        <div className="apiIntro">
+          <h1>API</h1>
+          <p>REST API documentation for PF2 Search.</p>
+        </div>
+
+        <div className="apiSplit">
+          <aside className="apiMaster">
+            <h2>Documents</h2>
+            <ul className="apiMasterList">
+              {API_DOC_SOURCES.map((source) => (
+                <li key={source.id}>
+                  <button
+                    type="button"
+                    className={`apiMasterButton${source.id === selectedId ? ' apiMasterActive' : ''}`}
+                    onClick={() => setSelectedId(source.id)}
+                    aria-current={source.id === selectedId ? 'true' : undefined}
+                  >
+                    <span className="apiMasterLabel">{source.label}</span>
+                    <span className="apiMasterDescription">{source.description}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
+
+          <section className="apiDetail" aria-label={selected.label}>
+            <header className="apiDetailHeader">
+              <h2>{selected.label}</h2>
+            </header>
+
+            {loading && selected.format !== 'swagger' && selected.format !== 'image' && (
+              <p className="apiStatus">Loading document…</p>
+            )}
+            {error && <p className="apiStatus apiError">{error}</p>}
+
+            {!loading && !error && selected.format === 'markdown' && (
+              <MarkdownViewer rawMD={content} className="apiMarkdownViewer" />
+            )}
+
+            {!loading && !error && selected.format === 'yaml' && (
+              <YamlViewer content={content} className="apiYamlViewer" />
+            )}
+
+            {selected.format === 'swagger' && (
+              <ApiSwaggerViewer className="apiSwaggerViewer" />
+            )}
+
+            {selected.format === 'image' && (
+              <ApiImageViewer
+                src={selected.path}
+                alt={selected.alt || selected.label}
+                className="apiImageViewer"
+              />
+            )}
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function YamlViewer({ content, className = '' }) {
+  return (
+    <pre className={`yamlViewer ${className}`.trim()}>
+      <code>{content}</code>
+    </pre>
+  );
+}
+
+function ApiSwaggerViewer({ className = '' }) {
+  return (
+    <div className={className}>
+      <SwaggerUI
+        url="/schemas/openapi.yaml"
+        docExpansion="list"
+        defaultModelsExpandDepth={-1}
+        tryItOutEnabled
+      />
+    </div>
+  );
+}
+
+function ApiImageViewer({ src, alt, className = '' }) {
+  return (
+    <div className={className}>
+      <img src={src} alt={alt} />
     </div>
   );
 }

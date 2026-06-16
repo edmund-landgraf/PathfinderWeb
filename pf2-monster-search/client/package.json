@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "node ../scripts/generate-updates.mjs && vite build",
+    "build": "node ../scripts/generate-updates.mjs && node ../scripts/copy-schemas.mjs && node ../scripts/copy-images.mjs && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test:markdown": "node scripts/test_markdown_extract_unit.mjs && node scripts/test_markdown_extract.mjs"
   },
@@ -17,6 +17,7 @@
     "react-dom": "latest",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "swagger-ui-react": "^5.32.6",
     "vite": "latest"
   }
 }

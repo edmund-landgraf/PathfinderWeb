@@ -54,7 +54,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3333` (or your server IP on that port). No dev server or `preview` needed.
+Open `http://localhost:3333` (or your server IP on that port). The UI, API (`/api/*`), schema files (`/schemas/*`), and API docs page (`/api-docs`) all run on this port. No dev server or `preview` needed.
 
 If `client/dist` is missing, the server runs API-only until you build.
 

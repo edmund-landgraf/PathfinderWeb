@@ -1467,11 +1467,29 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   npcMode: 'only'
 }));
 
+const schemasDir = [join(rootDir, 'schemas'), join(clientDistDir, 'schemas')].find(existsSync) ?? null;
+if (schemasDir) {
+  app.use('/schemas', express.static(schemasDir, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.yaml')) {
+        res.setHeader('Content-Type', 'application/yaml; charset=utf-8');
+      } else if (filePath.endsWith('.md')) {
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      }
+    }
+  }));
+}
+
+const imagesDir = [join(rootDir, 'images'), join(clientDistDir, 'images')].find(existsSync) ?? null;
+if (imagesDir) {
+  app.use('/images', express.static(imagesDir));
+}
+
 if (existsSync(clientDistDir)) {
   app.use(express.static(clientDistDir));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/schemas/') || req.path.startsWith('/images/')) {
       next();
       return;
     }
@@ -1488,6 +1506,12 @@ app.listen(port, () => {
     console.log(`Serving client from ${clientDistDir}`);
   } else {
     console.log('Client dist not found — API only. Run "npm run build" to serve the UI from this process.');
+  }
+  if (schemasDir) {
+    console.log(`Serving schemas from ${schemasDir}`);
+  }
+  if (imagesDir) {
+    console.log(`Serving images from ${imagesDir}`);
   }
   console.log(`DEBUG_SQL=${DEBUG_SQL}`);
 });

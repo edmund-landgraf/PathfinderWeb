@@ -7,7 +7,7 @@
     "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "dev": "concurrently \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
     "start": "npm --prefix server start",
-    "build": "node scripts/generate-updates.mjs && npm --prefix client run build",
+    "build": "node scripts/generate-updates.mjs && node scripts/copy-schemas.mjs && node scripts/copy-images.mjs && npm --prefix client run build",
     "generate:updates": "node scripts/generate-updates.mjs",
     "check": "node server/scripts/check_raw_md.mjs && node server/scripts/check_api_raw_md.mjs && npm run build",
     "preview": "npm --prefix client run preview"

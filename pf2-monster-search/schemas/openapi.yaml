@@ -1,0 +1,1315 @@
+openapi: 3.0.3
+info:
+  title: PF2 Monster Search API
+  version: 1.0.0
+  license:
+    name: Proprietary
+  description: |
+    Read-only JSON API for searching Pathfinder 2e creatures, NPCs, spells, feats, and equipment
+    from a SQL Server database (Archives of Nethys data).
+
+    All search endpoints return paginated result envelopes. Lookup endpoints return filter dropdown values.
+
+    **Base URL:** In production, the UI and API both run on port `3333` (`PORT` env var).
+    In development, the Vite client on port `5173` proxies `/api` and `/schemas` to Express.
+
+servers:
+  - url: /
+    description: Same origin — production on port 3333, or Vite dev proxy
+  - url: http://localhost:3333
+    description: Direct Express server (UI + API after `npm run build && npm start`)
+
+security: []
+
+tags:
+  - name: Health
+    description: Service and database connectivity checks
+  - name: Lookups
+    description: Filter dropdown values
+  - name: Creatures
+    description: Monster and NPC search
+  - name: Spells
+    description: Spell search
+  - name: Feats
+    description: Feat search
+  - name: Equipment
+    description: Equipment search
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Verifies the API is running and can reach SQL Server.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy and database is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSuccess'
+              example:
+                ok: true
+                db: true
+                elapsedMs: 42
+        '500':
+          description: Database or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthError'
+              example:
+                ok: false
+                error: Database login failed. Set SQL_TRUSTED_CONNECTION=true or provide SQL_USER and SQL_PASSWORD in server/.env
+
+  /api/lookups:
+    get:
+      tags: [Lookups]
+      summary: Monster/NPC filter lookups
+      description: Returns rarity, size, alignment, family, and source book values for creature search filters.
+      operationId: getLookups
+      responses:
+        '200':
+          description: Lookup values grouped by filter type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatureLookups'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/spell-lookups:
+    get:
+      tags: [Lookups]
+      summary: Spell filter lookups
+      operationId: getSpellLookups
+      responses:
+        '200':
+          description: Lookup values for spell search filters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpellLookups'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/feat-lookups:
+    get:
+      tags: [Lookups]
+      summary: Feat filter lookups
+      operationId: getFeatLookups
+      responses:
+        '200':
+          description: Lookup values for feat search filters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatLookups'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/equipment-lookups:
+    get:
+      tags: [Lookups]
+      summary: Equipment filter lookups
+      operationId: getEquipmentLookups
+      responses:
+        '200':
+          description: Lookup values for equipment search filters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipmentLookups'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/monsters:
+    get:
+      tags: [Creatures]
+      summary: Search monsters
+      description: |
+        Paginated search of creatures from `pf2.vwMonsterFull`, excluding NPCs (`IsNPC = 0`).
+
+        String filters use SQL `LIKE` with wildcards unless noted as exact match.
+        The `text` parameter uses SQL Server full-text search on `Name` and `RawText`.
+      operationId: searchMonsters
+      parameters:
+        - $ref: '#/components/parameters/creatureName'
+        - $ref: '#/components/parameters/levelMin'
+        - $ref: '#/components/parameters/levelMax'
+        - $ref: '#/components/parameters/rarityExact'
+        - $ref: '#/components/parameters/sizeExact'
+        - $ref: '#/components/parameters/alignmentExact'
+        - $ref: '#/components/parameters/family'
+        - $ref: '#/components/parameters/sourceBook'
+        - $ref: '#/components/parameters/text'
+        - $ref: '#/components/parameters/languages'
+        - $ref: '#/components/parameters/skills'
+        - $ref: '#/components/parameters/senses'
+        - $ref: '#/components/parameters/speed'
+        - $ref: '#/components/parameters/isUnique'
+        - $ref: '#/components/parameters/hpMin'
+        - $ref: '#/components/parameters/hpMax'
+        - $ref: '#/components/parameters/acMin'
+        - $ref: '#/components/parameters/acMax'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/creatureSortBy'
+        - $ref: '#/components/parameters/sortDir'
+      responses:
+        '200':
+          description: Paginated monster results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatureSearchResponse'
+        '500':
+          $ref: '#/components/responses/SearchError'
+
+  /api/npcs:
+    get:
+      tags: [Creatures]
+      summary: Search NPCs
+      description: |
+        Same filters and response shape as `/api/monsters`, but returns only NPCs (`IsNPC = 1`).
+      operationId: searchNpcs
+      parameters:
+        - $ref: '#/components/parameters/creatureName'
+        - $ref: '#/components/parameters/levelMin'
+        - $ref: '#/components/parameters/levelMax'
+        - $ref: '#/components/parameters/rarityExact'
+        - $ref: '#/components/parameters/sizeExact'
+        - $ref: '#/components/parameters/alignmentExact'
+        - $ref: '#/components/parameters/family'
+        - $ref: '#/components/parameters/sourceBook'
+        - $ref: '#/components/parameters/text'
+        - $ref: '#/components/parameters/languages'
+        - $ref: '#/components/parameters/skills'
+        - $ref: '#/components/parameters/senses'
+        - $ref: '#/components/parameters/speed'
+        - $ref: '#/components/parameters/isUnique'
+        - $ref: '#/components/parameters/hpMin'
+        - $ref: '#/components/parameters/hpMax'
+        - $ref: '#/components/parameters/acMin'
+        - $ref: '#/components/parameters/acMax'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/creatureSortBy'
+        - $ref: '#/components/parameters/sortDir'
+      responses:
+        '200':
+          description: Paginated NPC results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatureSearchResponse'
+        '500':
+          $ref: '#/components/responses/SearchError'
+
+  /api/spells:
+    get:
+      tags: [Spells]
+      summary: Search spells
+      description: |
+        Paginated spell search from `pf2.Spell` with joined rarity, traditions, traits, and source books.
+
+        `tradition` and `trait` use exact match against junction tables.
+        `text` uses full-text search on `Name`, `Summary`, and `RawText`.
+      operationId: searchSpells
+      parameters:
+        - $ref: '#/components/parameters/name'
+        - $ref: '#/components/parameters/rankMin'
+        - $ref: '#/components/parameters/rankMax'
+        - $ref: '#/components/parameters/spellType'
+        - $ref: '#/components/parameters/rarityExact'
+        - $ref: '#/components/parameters/sourceBook'
+        - $ref: '#/components/parameters/tradition'
+        - $ref: '#/components/parameters/traitExact'
+        - $ref: '#/components/parameters/actions'
+        - $ref: '#/components/parameters/defense'
+        - $ref: '#/components/parameters/duration'
+        - $ref: '#/components/parameters/text'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/spellSortBy'
+        - $ref: '#/components/parameters/sortDir'
+      responses:
+        '200':
+          description: Paginated spell results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpellSearchResponse'
+        '500':
+          $ref: '#/components/responses/SearchError'
+
+  /api/feats:
+    get:
+      tags: [Feats]
+      summary: Search feats
+      description: |
+        Paginated feat search from `pf2.Feat`.
+
+        `trait` uses exact match. `text` uses full-text search on `Name`, `Summary`, and `RawText`.
+      operationId: searchFeats
+      parameters:
+        - $ref: '#/components/parameters/name'
+        - $ref: '#/components/parameters/levelMin'
+        - $ref: '#/components/parameters/levelMax'
+        - $ref: '#/components/parameters/featType'
+        - $ref: '#/components/parameters/rarityExact'
+        - $ref: '#/components/parameters/sourceBook'
+        - $ref: '#/components/parameters/traitExact'
+        - $ref: '#/components/parameters/pfs'
+        - $ref: '#/components/parameters/isStandardAncestryFeat'
+        - $ref: '#/components/parameters/text'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/featSortBy'
+        - $ref: '#/components/parameters/sortDir'
+      responses:
+        '200':
+          description: Paginated feat results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatSearchResponse'
+        '500':
+          $ref: '#/components/responses/SearchError'
+
+  /api/equipment:
+    get:
+      tags: [Equipment]
+      summary: Search equipment
+      description: |
+        Paginated equipment search from `pf2.Equipment`.
+
+        `trait` uses exact match. `text` uses full-text search on `Name`, `Summary`, `RawText`,
+        `BaseItemText`, `SpellText`, and `StageText`.
+      operationId: searchEquipment
+      parameters:
+        - $ref: '#/components/parameters/name'
+        - $ref: '#/components/parameters/levelMin'
+        - $ref: '#/components/parameters/levelMax'
+        - $ref: '#/components/parameters/equipmentType'
+        - $ref: '#/components/parameters/searchCategory'
+        - $ref: '#/components/parameters/itemCategory'
+        - $ref: '#/components/parameters/itemSubcategory'
+        - $ref: '#/components/parameters/rarityExact'
+        - $ref: '#/components/parameters/sourceBook'
+        - $ref: '#/components/parameters/traitExact'
+        - $ref: '#/components/parameters/pfs'
+        - $ref: '#/components/parameters/price'
+        - $ref: '#/components/parameters/bulk'
+        - $ref: '#/components/parameters/priceMin'
+        - $ref: '#/components/parameters/priceMax'
+        - $ref: '#/components/parameters/weaponCategory'
+        - $ref: '#/components/parameters/weaponGroup'
+        - $ref: '#/components/parameters/weaponType'
+        - $ref: '#/components/parameters/damageType'
+        - $ref: '#/components/parameters/armorCategory'
+        - $ref: '#/components/parameters/text'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/equipmentSortBy'
+        - $ref: '#/components/parameters/sortDir'
+      responses:
+        '200':
+          description: Paginated equipment results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipmentSearchResponse'
+        '500':
+          $ref: '#/components/responses/SearchError'
+
+components:
+  responses:
+    InternalError:
+      description: Server or database error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Connection timeout
+
+    SearchError:
+      description: Search failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SearchErrorResponse'
+
+  parameters:
+    name:
+      name: name
+      in: query
+      description: Partial name match (SQL LIKE)
+      schema:
+        type: string
+
+    creatureName:
+      name: name
+      in: query
+      description: Partial creature name match (SQL LIKE)
+      schema:
+        type: string
+
+    levelMin:
+      name: levelMin
+      in: query
+      description: Minimum level (inclusive)
+      schema:
+        type: integer
+
+    levelMax:
+      name: levelMax
+      in: query
+      description: Maximum level (inclusive)
+      schema:
+        type: integer
+
+    rankMin:
+      name: rankMin
+      in: query
+      description: Minimum spell rank (inclusive)
+      schema:
+        type: integer
+
+    rankMax:
+      name: rankMax
+      in: query
+      description: Maximum spell rank (inclusive)
+      schema:
+        type: integer
+
+    rarityExact:
+      name: rarity
+      in: query
+      description: Exact rarity name match
+      schema:
+        type: string
+
+    sizeExact:
+      name: size
+      in: query
+      description: Exact size name match
+      schema:
+        type: string
+
+    alignmentExact:
+      name: alignment
+      in: query
+      description: Exact alignment name match
+      schema:
+        type: string
+
+    family:
+      name: family
+      in: query
+      description: Partial family name match (SQL LIKE)
+      schema:
+        type: string
+
+    sourceBook:
+      name: sourceBook
+      in: query
+      description: Partial source book name match (SQL LIKE)
+      schema:
+        type: string
+
+    text:
+      name: text
+      in: query
+      description: Full-text search across entity-specific text columns
+      schema:
+        type: string
+
+    languages:
+      name: languages
+      in: query
+      description: Partial languages match (SQL LIKE)
+      schema:
+        type: string
+
+    skills:
+      name: skills
+      in: query
+      description: Partial skills match (SQL LIKE)
+      schema:
+        type: string
+
+    senses:
+      name: senses
+      in: query
+      description: Partial senses match (SQL LIKE)
+      schema:
+        type: string
+
+    speed:
+      name: speed
+      in: query
+      description: Partial speed match (SQL LIKE)
+      schema:
+        type: string
+
+    isUnique:
+      name: isUnique
+      in: query
+      description: Filter unique creatures
+      schema:
+        type: boolean
+
+    hpMin:
+      name: hpMin
+      in: query
+      schema:
+        type: integer
+
+    hpMax:
+      name: hpMax
+      in: query
+      schema:
+        type: integer
+
+    acMin:
+      name: acMin
+      in: query
+      schema:
+        type: integer
+
+    acMax:
+      name: acMax
+      in: query
+      schema:
+        type: integer
+
+    spellType:
+      name: spellType
+      in: query
+      description: Partial spell type match (SQL LIKE)
+      schema:
+        type: string
+
+    tradition:
+      name: tradition
+      in: query
+      description: Exact tradition name match
+      schema:
+        type: string
+
+    traitExact:
+      name: trait
+      in: query
+      description: Exact trait name match
+      schema:
+        type: string
+
+    actions:
+      name: actions
+      in: query
+      description: Partial actions match (SQL LIKE)
+      schema:
+        type: string
+
+    defense:
+      name: defense
+      in: query
+      description: Partial defense match (SQL LIKE)
+      schema:
+        type: string
+
+    duration:
+      name: duration
+      in: query
+      description: Partial duration match (SQL LIKE)
+      schema:
+        type: string
+
+    featType:
+      name: featType
+      in: query
+      description: Partial feat type match (SQL LIKE)
+      schema:
+        type: string
+
+    pfs:
+      name: pfs
+      in: query
+      description: Partial Pathfinder Society legality match (SQL LIKE)
+      schema:
+        type: string
+
+    isStandardAncestryFeat:
+      name: isStandardAncestryFeat
+      in: query
+      description: Filter standard ancestry feats
+      schema:
+        type: boolean
+
+    equipmentType:
+      name: equipmentType
+      in: query
+      schema:
+        type: string
+
+    searchCategory:
+      name: searchCategory
+      in: query
+      schema:
+        type: string
+
+    itemCategory:
+      name: itemCategory
+      in: query
+      schema:
+        type: string
+
+    itemSubcategory:
+      name: itemSubcategory
+      in: query
+      schema:
+        type: string
+
+    price:
+      name: price
+      in: query
+      description: Partial price text match (SQL LIKE)
+      schema:
+        type: string
+
+    bulk:
+      name: bulk
+      in: query
+      description: Partial bulk text match (SQL LIKE)
+      schema:
+        type: string
+
+    priceMin:
+      name: priceMin
+      in: query
+      description: Minimum price in copper pieces (inclusive)
+      schema:
+        type: integer
+
+    priceMax:
+      name: priceMax
+      in: query
+      description: Maximum price in copper pieces (inclusive)
+      schema:
+        type: integer
+
+    weaponCategory:
+      name: weaponCategory
+      in: query
+      schema:
+        type: string
+
+    weaponGroup:
+      name: weaponGroup
+      in: query
+      schema:
+        type: string
+
+    weaponType:
+      name: weaponType
+      in: query
+      schema:
+        type: string
+
+    damageType:
+      name: damageType
+      in: query
+      schema:
+        type: string
+
+    armorCategory:
+      name: armorCategory
+      in: query
+      schema:
+        type: string
+
+    limit:
+      name: limit
+      in: query
+      description: Page size (default 100, clamped to 1–500)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+
+    offset:
+      name: offset
+      in: query
+      description: Number of rows to skip (default 0)
+      schema:
+        type: integer
+        minimum: 0
+
+    sortDir:
+      name: sortDir
+      in: query
+      description: Sort direction
+      schema:
+        type: string
+        enum: [asc, desc]
+
+    creatureSortBy:
+      name: sortBy
+      in: query
+      description: Column to sort creature results by
+      schema:
+        type: string
+        enum:
+          - Name
+          - Level
+          - Rarity
+          - Size
+          - Alignment
+          - Family
+          - SourceBook
+          - HP
+          - AC
+          - Fortitude
+          - Reflex
+          - Will
+          - Perception
+
+    spellSortBy:
+      name: sortBy
+      in: query
+      schema:
+        type: string
+        enum:
+          - Name
+          - Rank
+          - SpellType
+          - Rarity
+          - SourceBook
+          - Traditions
+          - Traits
+          - Actions
+          - Defense
+          - Duration
+
+    featSortBy:
+      name: sortBy
+      in: query
+      schema:
+        type: string
+        enum:
+          - Name
+          - Level
+          - FeatType
+          - Rarity
+          - SourceBook
+          - Traits
+          - PFS
+          - IsStandardAncestryFeat
+
+    equipmentSortBy:
+      name: sortBy
+      in: query
+      schema:
+        type: string
+        enum:
+          - Name
+          - Level
+          - EquipmentType
+          - SearchCategory
+          - ItemCategory
+          - ItemSubcategory
+          - Rarity
+          - SourceBook
+          - Traits
+          - PriceCp
+          - BulkValue
+          - WeaponCategory
+          - ArmorCategory
+
+  schemas:
+    HealthSuccess:
+      type: object
+      required: [ok, db, elapsedMs]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        db:
+          type: boolean
+          description: Whether the database query succeeded
+          example: true
+        elapsedMs:
+          type: integer
+          description: Request duration in milliseconds
+          example: 42
+
+    HealthError:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    SearchErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - type: object
+          properties:
+            debug:
+              type: object
+              description: Present when DEBUG_SQL environment variable is true
+              additionalProperties: true
+
+    LookupItem:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
+    CreatureLookups:
+      type: object
+      required: [rarity, size, alignment, family, sourceBook]
+      properties:
+        rarity:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        size:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        alignment:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        family:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        sourceBook:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+
+    SpellLookups:
+      type: object
+      required: [rarity, sourceBook, tradition, trait]
+      properties:
+        rarity:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        sourceBook:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        tradition:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        trait:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+
+    FeatLookups:
+      type: object
+      required: [rarity, sourceBook, trait]
+      properties:
+        rarity:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        sourceBook:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        trait:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+
+    EquipmentLookups:
+      type: object
+      required: [rarity, sourceBook, trait]
+      properties:
+        rarity:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        sourceBook:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+        trait:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+
+    SearchDebug:
+      type: object
+      description: SQL debug metadata (included when DEBUG_SQL=true)
+      properties:
+        where:
+          type: array
+          items:
+            type: string
+        params:
+          type: object
+          additionalProperties: true
+        sortBy:
+          type: string
+        sortDir:
+          type: string
+        orderBySql:
+          type: string
+        elapsedMs:
+          type: integer
+
+    PaginatedSearchEnvelope:
+      type: object
+      required: [rows, total, limit, offset]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+          description: Total matching rows before pagination
+        limit:
+          type: integer
+        offset:
+          type: integer
+        debug:
+          $ref: '#/components/schemas/SearchDebug'
+
+    Creature:
+      type: object
+      description: |
+        Row from `pf2.vwMonsterFull` plus a computed `SourcePurchaseURL`.
+        Additional view columns may be present.
+      properties:
+        MonsterId:
+          type: integer
+        Name:
+          type: string
+        Level:
+          type: integer
+          nullable: true
+        Rarity:
+          type: string
+          nullable: true
+        Size:
+          type: string
+          nullable: true
+        Alignment:
+          type: string
+          nullable: true
+        Family:
+          type: string
+          nullable: true
+        SourceBook:
+          type: string
+          nullable: true
+        SourcePurchaseURL:
+          type: string
+          nullable: true
+        HP:
+          type: integer
+          nullable: true
+        AC:
+          type: integer
+          nullable: true
+        Fortitude:
+          type: integer
+          nullable: true
+        Reflex:
+          type: integer
+          nullable: true
+        Will:
+          type: integer
+          nullable: true
+        Perception:
+          type: integer
+          nullable: true
+        Speed:
+          type: string
+          nullable: true
+        Languages:
+          type: string
+          nullable: true
+        Skills:
+          type: string
+          nullable: true
+        Senses:
+          type: string
+          nullable: true
+        IsNPC:
+          type: boolean
+        IsUnique:
+          type: boolean
+          nullable: true
+        AonUrl:
+          type: string
+          nullable: true
+        RawHtml:
+          type: string
+          nullable: true
+        RawText:
+          type: string
+          nullable: true
+        RawMD:
+          type: string
+          nullable: true
+        RawJson:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    CreatureSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedSearchEnvelope'
+        - type: object
+          properties:
+            rows:
+              type: array
+              items:
+                $ref: '#/components/schemas/Creature'
+
+    Spell:
+      type: object
+      properties:
+        SpellId:
+          type: integer
+        AonId:
+          type: integer
+          nullable: true
+        AonUrl:
+          type: string
+          nullable: true
+        Name:
+          type: string
+        Rank:
+          type: integer
+          nullable: true
+        SpellType:
+          type: string
+          nullable: true
+        Rarity:
+          type: string
+          nullable: true
+        SourceBook:
+          type: string
+          nullable: true
+        SourcePurchaseURL:
+          type: string
+          nullable: true
+        SourcePage:
+          type: string
+          nullable: true
+        Traditions:
+          type: string
+          nullable: true
+        Traits:
+          type: string
+          nullable: true
+        Actions:
+          type: string
+          nullable: true
+        TriggerText:
+          type: string
+          nullable: true
+        Target:
+          type: string
+          nullable: true
+        RangeText:
+          type: string
+          nullable: true
+        Area:
+          type: string
+          nullable: true
+        Duration:
+          type: string
+          nullable: true
+        Defense:
+          type: string
+          nullable: true
+        Heighten:
+          type: string
+          nullable: true
+        Summary:
+          type: string
+          nullable: true
+        PFS:
+          type: string
+          nullable: true
+        Components:
+          type: string
+          nullable: true
+        School:
+          type: string
+          nullable: true
+        Bloodline:
+          type: string
+          nullable: true
+        DomainText:
+          type: string
+          nullable: true
+        RemasterId:
+          type: integer
+          nullable: true
+        RemasterName:
+          type: string
+          nullable: true
+        RawHtml:
+          type: string
+          nullable: true
+        RawText:
+          type: string
+          nullable: true
+        RawMD:
+          type: string
+          nullable: true
+        RawJson:
+          type: string
+          nullable: true
+
+    SpellSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedSearchEnvelope'
+        - type: object
+          properties:
+            rows:
+              type: array
+              items:
+                $ref: '#/components/schemas/Spell'
+
+    Feat:
+      type: object
+      properties:
+        FeatId:
+          type: integer
+        AonId:
+          type: integer
+          nullable: true
+        AonUrl:
+          type: string
+          nullable: true
+        Name:
+          type: string
+        Level:
+          type: integer
+          nullable: true
+        FeatType:
+          type: string
+          nullable: true
+        Rarity:
+          type: string
+          nullable: true
+        SourceBook:
+          type: string
+          nullable: true
+        SourcePurchaseURL:
+          type: string
+          nullable: true
+        SourcePage:
+          type: string
+          nullable: true
+        Traits:
+          type: string
+          nullable: true
+        PFS:
+          type: string
+          nullable: true
+        IsStandardAncestryFeat:
+          type: boolean
+          nullable: true
+        Summary:
+          type: string
+          nullable: true
+        RemasterId:
+          type: integer
+          nullable: true
+        RawHtml:
+          type: string
+          nullable: true
+        RawText:
+          type: string
+          nullable: true
+        RawMD:
+          type: string
+          nullable: true
+        RawJson:
+          type: string
+          nullable: true
+
+    FeatSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedSearchEnvelope'
+        - type: object
+          properties:
+            rows:
+              type: array
+              items:
+                $ref: '#/components/schemas/Feat'
+
+    Equipment:
+      type: object
+      properties:
+        EquipmentId:
+          type: integer
+        AonId:
+          type: integer
+          nullable: true
+        AonKey:
+          type: string
+          nullable: true
+        AonUrl:
+          type: string
+          nullable: true
+        Name:
+          type: string
+        Level:
+          type: integer
+          nullable: true
+        EquipmentType:
+          type: string
+          nullable: true
+        SearchCategory:
+          type: string
+          nullable: true
+        ItemCategory:
+          type: string
+          nullable: true
+        ItemSubcategory:
+          type: string
+          nullable: true
+        Rarity:
+          type: string
+          nullable: true
+        SourceBook:
+          type: string
+          nullable: true
+        SourcePurchaseURL:
+          type: string
+          nullable: true
+        SourcePage:
+          type: string
+          nullable: true
+        Traits:
+          type: string
+          nullable: true
+        PFS:
+          type: string
+          nullable: true
+        PriceCp:
+          type: integer
+          nullable: true
+        PriceText:
+          type: string
+          nullable: true
+        BulkValue:
+          type: number
+          nullable: true
+        BulkText:
+          type: string
+          nullable: true
+        Summary:
+          type: string
+          nullable: true
+        RemasterId:
+          type: integer
+          nullable: true
+        BaseItemText:
+          type: string
+          nullable: true
+        SpellText:
+          type: string
+          nullable: true
+        StageText:
+          type: string
+          nullable: true
+        WeaponCategory:
+          type: string
+          nullable: true
+        WeaponGroup:
+          type: string
+          nullable: true
+        WeaponType:
+          type: string
+          nullable: true
+        Damage:
+          type: string
+          nullable: true
+        DamageDie:
+          type: string
+          nullable: true
+        DamageType:
+          type: string
+          nullable: true
+        Hands:
+          type: string
+          nullable: true
+        AmmunitionText:
+          type: string
+          nullable: true
+        ArmorCategory:
+          type: string
+          nullable: true
+        ArmorGroupText:
+          type: string
+          nullable: true
+        AC:
+          type: integer
+          nullable: true
+        Hardness:
+          type: integer
+          nullable: true
+        HardnessText:
+          type: string
+          nullable: true
+        HP:
+          type: integer
+          nullable: true
+        HPText:
+          type: string
+          nullable: true
+        RawHtml:
+          type: string
+          nullable: true
+        RawText:
+          type: string
+          nullable: true
+        RawMD:
+          type: string
+          nullable: true
+        RawJson:
+          type: string
+          nullable: true
+
+    EquipmentSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedSearchEnvelope'
+        - type: object
+          properties:
+            rows:
+              type: array
+              items:
+                $ref: '#/components/schemas/Equipment'

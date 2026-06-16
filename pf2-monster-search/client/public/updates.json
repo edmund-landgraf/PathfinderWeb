@@ -1,8 +1,20 @@
 {
-  "generatedAt": "2026-06-15T05:16:09.679Z",
+  "generatedAt": "2026-06-16T04:55:09.739Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-06-15",
+        "comment": "Add database maintenance scripts and schema documentation."
+      },
+      {
+        "date": "2026-06-15",
+        "comment": "Improve grid keyboard nav, layout alignment, and search API reliability."
+      },
+      {
+        "date": "2026-06-15",
+        "comment": "Serve built client from Express for production deploys"
+      },
       {
         "date": "2026-06-14",
         "comment": "Added NPCs as a fifth home library with its own search page and API endpoint; Monsters search excludes NPCs."
@@ -14,6 +26,10 @@
       {
         "date": "2026-06-14",
         "comment": "Escape closes entity modals the same as the close button; nested MD and image popouts close first."
+      },
+      {
+        "date": "2026-06-14",
+        "comment": "Expand PF2 search with NPCs, modals, updates, and keyboard nav"
       },
       {
         "date": "2026-06-14",
