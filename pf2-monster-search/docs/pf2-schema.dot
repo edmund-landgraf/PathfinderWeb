@@ -1,0 +1,565 @@
+digraph pf2_schema {
+  graph [
+    rankdir=LR,
+    bgcolor="#f8fafc",
+    pad="0.4",
+    splines=ortho,
+    nodesep=0.35,
+    ranksep=1.0,
+    fontname="Segoe UI",
+    fontsize=11,
+    label="PathfinderUtil :: pf2 schema\n30 enforced FKs (solid) + 5 logical FKs (dashed)\nFK* = logical only (no DB constraint)",
+    labelloc=t,
+    fontsize=16
+  ];
+  node [
+    shape=plaintext,
+    fontname="Consolas",
+    fontsize=10
+  ];
+  edge [
+    color="#64748b",
+    arrowsize=0.7,
+    penwidth=1.0,
+    fontname="Segoe UI",
+    fontsize=9
+  ];
+
+  subgraph cluster_lookup {
+    label="Lookup";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "Alignment" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Alignment</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">AlignmentId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(50) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterFamily" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterFamily</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">FamilyId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(200) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "Rarity" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Rarity</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">RarityId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(50) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SizeCategory" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SizeCategory</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SizeId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(50) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "Tradition" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Tradition</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">TraditionId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(100) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "Trait" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Trait</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">TraitId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(100) NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  subgraph cluster_source {
+    label="Source";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "SourceBook" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SourceBook</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(200) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">SourcePurchaseID : int FK</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SourceBookPurchase" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SourceBookPurchase</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookPurchaseId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(500) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">StoreUrl : nvarchar(1000) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">LongDescription : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Price : decimal(10,2)</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  subgraph cluster_monster {
+    label="Monster";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "Monster" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Monster</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonId : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(250) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Level : int</TD></TR>
+          <TR><TD ALIGN="LEFT">RarityId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SizeId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">AlignmentId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">FamilyId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourcePage : int</TD></TR>
+          <TR><TD ALIGN="LEFT">IsUnique : bit</TD></TR>
+          <TR><TD ALIGN="LEFT">IsNPC : bit</TD></TR>
+          <TR><TD ALIGN="LEFT">RawHtml : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawJson : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">CreatedAt : datetime2</TD></TR>
+          <TR><TD ALIGN="LEFT">UpdatedAt : datetime2</TD></TR>
+          <TR><TD ALIGN="LEFT">LastScraped : datetime2</TD></TR>
+          <TR><TD ALIGN="LEFT">ScrapeVersion : nvarchar(50)</TD></TR>
+          <TR><TD ALIGN="LEFT">ImageUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawMD : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterAbility" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterAbility</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">AbilityId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">ActionCost : nvarchar(50)</TD></TR>
+          <TR><TD ALIGN="LEFT">AbilityType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">Traits : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Description : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterAttack" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterAttack</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">AttackId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int FK*</TD></TR>
+          <TR><TD ALIGN="LEFT">AttackType : nvarchar(50)</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(200)</TD></TR>
+          <TR><TD ALIGN="LEFT">ActionCost : nvarchar(50)</TD></TR>
+          <TR><TD ALIGN="LEFT">AttackBonus : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Traits : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Damage : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Effects : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterImportLog" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterImportLog</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">ImportLogId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">ImportedAt : datetime2</TD></TR>
+          <TR><TD ALIGN="LEFT">Success : bit</TD></TR>
+          <TR><TD ALIGN="LEFT">Message : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterSourceLink" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterSourceLink</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterSourceLinkId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int FK*</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK*</TD></TR>
+          <TR><TD ALIGN="LEFT">PageNumber : int</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterSpell" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterSpell</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterSpellId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellcastingId : int FK*</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellLevel : int</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellName : nvarchar(250)</TD></TR>
+          <TR><TD ALIGN="LEFT">Uses : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">Notes : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterSpellcasting" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterSpellcasting</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellcastingId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int FK*</TD></TR>
+          <TR><TD ALIGN="LEFT">Tradition : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellcastingType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">DC : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AttackBonus : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Notes : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterStats" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterStats</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Perception : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Senses : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Languages : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Skills : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Items : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">StrMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">DexMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">ConMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">IntMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">WisMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">ChaMod : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AC : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Fortitude : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Reflex : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Will : int</TD></TR>
+          <TR><TD ALIGN="LEFT">HP : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Immunities : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Resistances : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Weaknesses : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Speed : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "MonsterTrait" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterTrait</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">TraitId : int PK NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  subgraph cluster_spell {
+    label="Spell";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "Spell" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Spell</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonId : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(300) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Rank : int</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RarityId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourcePage : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Actions : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">TriggerText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Target : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RangeText : nvarchar(250)</TD></TR>
+          <TR><TD ALIGN="LEFT">Area : nvarchar(250)</TD></TR>
+          <TR><TD ALIGN="LEFT">Duration : nvarchar(250)</TD></TR>
+          <TR><TD ALIGN="LEFT">Defense : nvarchar(300)</TD></TR>
+          <TR><TD ALIGN="LEFT">Heighten : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">Summary : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">PFS : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">Components : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">School : nvarchar(150)</TD></TR>
+          <TR><TD ALIGN="LEFT">Bloodline : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">DomainText : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">RemasterId : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">RemasterName : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawHtml : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawJson : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">CreatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">UpdatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">LastScraped : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">ScrapeVersion : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawMD : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SpellImportLog" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SpellImportLog</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellImportLogId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">ImportedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Success : bit NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Message : nvarchar(4000)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SpellSourceLink" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SpellSourceLink</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellSourceLinkId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">PageNumber : int</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SpellTradition" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SpellTradition</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">TraditionId : int PK NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+    "SpellTrait" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>SpellTrait</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">SpellId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">TraitId : int PK NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  subgraph cluster_feat {
+    label="Feat";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "Feat" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Feat</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">FeatId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonId : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(300) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Level : int</TD></TR>
+          <TR><TD ALIGN="LEFT">FeatType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RarityId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourcePage : int</TD></TR>
+          <TR><TD ALIGN="LEFT">PFS : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">IsStandardAncestryFeat : bit NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Summary : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RemasterId : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawHtml : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawJson : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">CreatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">UpdatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">LastScraped : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">ScrapeVersion : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawMD : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "FeatImportLog" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>FeatImportLog</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">FeatImportLogId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">ImportedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Success : bit NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Message : nvarchar(4000)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "FeatSourceLink" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>FeatSourceLink</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">FeatSourceLinkId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">FeatId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">PageNumber : int</TD></TR>
+        </TABLE>
+      >
+    ];
+    "FeatTrait" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>FeatTrait</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">FeatId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">TraitId : int PK NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  subgraph cluster_equipment {
+    label="Equipment";
+    style=rounded;
+    color="#cbd5e1";
+    bgcolor="#ffffff";
+    fontname="Segoe UI";
+    fontsize=12;
+    "Equipment" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>Equipment</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonId : int</TD></TR>
+          <TR><TD ALIGN="LEFT">AonKey : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">Name : nvarchar(300) NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Level : int</TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">SearchCategory : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">ItemCategory : nvarchar(200)</TD></TR>
+          <TR><TD ALIGN="LEFT">ItemSubcategory : nvarchar(200)</TD></TR>
+          <TR><TD ALIGN="LEFT">RarityId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK</TD></TR>
+          <TR><TD ALIGN="LEFT">SourcePage : int</TD></TR>
+          <TR><TD ALIGN="LEFT">PFS : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">PriceCp : int</TD></TR>
+          <TR><TD ALIGN="LEFT">PriceText : nvarchar(200)</TD></TR>
+          <TR><TD ALIGN="LEFT">BulkValue : decimal(12,4)</TD></TR>
+          <TR><TD ALIGN="LEFT">BulkText : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">Summary : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RemasterId : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">BaseItemText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">SpellText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">StageText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">WeaponCategory : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">WeaponGroup : nvarchar(150)</TD></TR>
+          <TR><TD ALIGN="LEFT">WeaponType : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">Damage : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">DamageDie : int</TD></TR>
+          <TR><TD ALIGN="LEFT">DamageType : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">Hands : nvarchar(50)</TD></TR>
+          <TR><TD ALIGN="LEFT">AmmunitionText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">ArmorCategory : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">ArmorGroupText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">AC : int</TD></TR>
+          <TR><TD ALIGN="LEFT">Hardness : int</TD></TR>
+          <TR><TD ALIGN="LEFT">HardnessText : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">HP : int</TD></TR>
+          <TR><TD ALIGN="LEFT">HPText : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawHtml : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawText : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawJson : nvarchar(max)</TD></TR>
+          <TR><TD ALIGN="LEFT">CreatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">UpdatedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">LastScraped : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">ScrapeVersion : nvarchar(100)</TD></TR>
+          <TR><TD ALIGN="LEFT">RawMD : nvarchar(max)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "EquipmentImportLog" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>EquipmentImportLog</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentImportLogId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">AonUrl : nvarchar(500)</TD></TR>
+          <TR><TD ALIGN="LEFT">ImportedAt : datetime2 NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Success : bit NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">Message : nvarchar(4000)</TD></TR>
+        </TABLE>
+      >
+    ];
+    "EquipmentSourceLink" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>EquipmentSourceLink</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentSourceLinkId : int PK NOT NULL IDENTITY</TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">SourceBookId : int FK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">PageNumber : int</TD></TR>
+        </TABLE>
+      >
+    ];
+    "EquipmentTrait" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>EquipmentTrait</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">EquipmentId : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">TraitId : int PK NOT NULL</TD></TR>
+        </TABLE>
+      >
+    ];
+  }
+
+  "Equipment" -> "Rarity" [color="#334155", penwidth=1.4, label="RarityId → RarityId"];
+  "Equipment" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "EquipmentSourceLink" -> "Equipment" [color="#334155", penwidth=1.4, label="EquipmentId → EquipmentId"];
+  "EquipmentSourceLink" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "EquipmentTrait" -> "Equipment" [color="#334155", penwidth=1.4, label="EquipmentId → EquipmentId"];
+  "EquipmentTrait" -> "Trait" [color="#334155", penwidth=1.4, label="TraitId → TraitId"];
+  "Feat" -> "Rarity" [color="#334155", penwidth=1.4, label="RarityId → RarityId"];
+  "Feat" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "FeatSourceLink" -> "Feat" [color="#334155", penwidth=1.4, label="FeatId → FeatId"];
+  "FeatSourceLink" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "FeatTrait" -> "Feat" [color="#334155", penwidth=1.4, label="FeatId → FeatId"];
+  "FeatTrait" -> "Trait" [color="#334155", penwidth=1.4, label="TraitId → TraitId"];
+  "Monster" -> "Alignment" [color="#334155", penwidth=1.4, label="AlignmentId → AlignmentId"];
+  "Monster" -> "MonsterFamily" [color="#334155", penwidth=1.4, label="FamilyId → FamilyId"];
+  "Monster" -> "Rarity" [color="#334155", penwidth=1.4, label="RarityId → RarityId"];
+  "Monster" -> "SizeCategory" [color="#334155", penwidth=1.4, label="SizeId → SizeId"];
+  "Monster" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "MonsterAbility" -> "Monster" [color="#334155", penwidth=1.4, label="MonsterId → MonsterId"];
+  "MonsterStats" -> "Monster" [color="#334155", penwidth=1.4, label="MonsterId → MonsterId"];
+  "MonsterTrait" -> "Monster" [color="#334155", penwidth=1.4, label="MonsterId → MonsterId"];
+  "MonsterTrait" -> "Trait" [color="#334155", penwidth=1.4, label="TraitId → TraitId"];
+  "SourceBook" -> "SourceBookPurchase" [color="#334155", penwidth=1.4, label="SourcePurchaseID → SourceBookPurchaseId"];
+  "Spell" -> "Rarity" [color="#334155", penwidth=1.4, label="RarityId → RarityId"];
+  "Spell" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "SpellSourceLink" -> "SourceBook" [color="#334155", penwidth=1.4, label="SourceBookId → SourceBookId"];
+  "SpellSourceLink" -> "Spell" [color="#334155", penwidth=1.4, label="SpellId → SpellId"];
+  "SpellTradition" -> "Spell" [color="#334155", penwidth=1.4, label="SpellId → SpellId"];
+  "SpellTradition" -> "Tradition" [color="#334155", penwidth=1.4, label="TraditionId → TraditionId"];
+  "SpellTrait" -> "Spell" [color="#334155", penwidth=1.4, label="SpellId → SpellId"];
+  "SpellTrait" -> "Trait" [color="#334155", penwidth=1.4, label="TraitId → TraitId"];
+  "MonsterAttack" -> "Monster" [color="#94a3b8", style=dashed, penwidth=1.1, label="MonsterId → MonsterId"];
+  "MonsterSourceLink" -> "Monster" [color="#94a3b8", style=dashed, penwidth=1.1, label="MonsterId → MonsterId"];
+  "MonsterSourceLink" -> "SourceBook" [color="#94a3b8", style=dashed, penwidth=1.1, label="SourceBookId → SourceBookId"];
+  "MonsterSpell" -> "MonsterSpellcasting" [color="#94a3b8", style=dashed, penwidth=1.1, label="SpellcastingId → SpellcastingId"];
+  "MonsterSpellcasting" -> "Monster" [color="#94a3b8", style=dashed, penwidth=1.1, label="MonsterId → MonsterId"];
+}
