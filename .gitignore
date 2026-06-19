@@ -11,3 +11,8 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 *.zip
+
+# pf2-monster-search generated schema diagram assets
+pf2-monster-search/images/*.png
+pf2-monster-search/client/public/images/
+pf2-monster-search/docs/pf2-schema.png

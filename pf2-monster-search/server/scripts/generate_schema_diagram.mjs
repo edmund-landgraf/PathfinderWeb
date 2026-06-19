@@ -459,6 +459,11 @@ async function main() {
 
   await renderDotToPng(dotPath, pngPath);
   console.log(`Wrote ${pngPath}`);
+
+  const libraryPngPath = path.join(__dirname, '..', '..', 'images', 'dbschema.png');
+  await fs.mkdir(path.dirname(libraryPngPath), { recursive: true });
+  await fs.copyFile(pngPath, libraryPngPath);
+  console.log(`Wrote ${libraryPngPath}`);
 }
 
 main().catch((err) => {

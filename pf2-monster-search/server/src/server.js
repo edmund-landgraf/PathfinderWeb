@@ -19,6 +19,9 @@ app.use(express.json());
 const DEBUG_SQL =
   String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
 
+const LOAD_AON_IMAGE_PREVIEW =
+  String(process.env.loadAoNImagePreview ?? 'true').toLowerCase() !== 'false';
+
 const allowedSortColumns = new Set([
   'Name',
   'Level',
@@ -202,6 +205,18 @@ async function attachSourcePurchaseUrls(pool, rows) {
   const urlMap = await getSourcePurchaseUrlMap(pool);
   for (const row of rows) {
     row.SourcePurchaseURL = buildSourcePurchaseUrl(row.SourceBook, urlMap);
+  }
+
+  return rows;
+}
+
+function applyLoadAoNImagePreview(rows) {
+  if (LOAD_AON_IMAGE_PREVIEW || !rows?.length) return rows;
+
+  for (const row of rows) {
+    if ('ImageUrl' in row) {
+      row.ImageUrl = null;
+    }
   }
 
   return rows;
@@ -1421,6 +1436,8 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
+    applyLoadAoNImagePreview(rows);
+
     await attachSourcePurchaseUrls(pool, rows);
 
     logValue('Rows returned:', rows.length);
@@ -1514,4 +1531,5 @@ app.listen(port, () => {
     console.log(`Serving images from ${imagesDir}`);
   }
   console.log(`DEBUG_SQL=${DEBUG_SQL}`);
+  console.log(`loadAoNImagePreview=${LOAD_AON_IMAGE_PREVIEW}`);
 });
