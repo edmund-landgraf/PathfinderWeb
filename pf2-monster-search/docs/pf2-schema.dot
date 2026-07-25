@@ -155,6 +155,15 @@ digraph pf2_schema {
         </TABLE>
       >
     ];
+    "MonsterImage" [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">
+          <TR><TD BGCOLOR="#1e293b" ALIGN="LEFT"><FONT COLOR="#ffffff"><B>MonsterImage</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterID : int PK NOT NULL</TD></TR>
+          <TR><TD ALIGN="LEFT">MonsterImage : image</TD></TR>
+        </TABLE>
+      >
+    ];
     "MonsterAbility" [
       label=<
         <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#ffffff">

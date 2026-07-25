@@ -746,13 +746,67 @@ function YamlViewer({ content, className = '' }) {
   );
 }
 
+function withRuntimeSwaggerServer(specText) {
+  const origin = window.location.origin;
+  const serverBlock = [
+    'servers:',
+    `  - url: ${origin}`,
+    '    description: Current API host'
+  ].join('\n');
+
+  if (/^servers:\r?\n(?:[ \t].*(?:\r?\n|$))+/m.test(specText)) {
+    return specText.replace(/^servers:\r?\n(?:[ \t].*(?:\r?\n|$))+/m, `${serverBlock}\n\n`);
+  }
+
+  return specText.replace(/^security:/m, `${serverBlock}\n\nsecurity:`);
+}
+
 function ApiSwaggerViewer({ className = '' }) {
+  const [specUrl, setSpecUrl] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = '';
+
+    fetch('/schemas/openapi.yaml')
+      .then((response) => {
+        if (!response.ok) throw new Error('Could not load openapi.yaml.');
+        return response.text();
+      })
+      .then((text) => {
+        if (cancelled) return;
+        const runtimeSpec = withRuntimeSwaggerServer(text);
+        objectUrl = URL.createObjectURL(new Blob([runtimeSpec], { type: 'application/yaml' }));
+        setSpecUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || String(err));
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, []);
+
+  const requestInterceptor = useCallback((request) => {
+    if (request.url?.startsWith('http://localhost:3333/')) {
+      request.url = request.url.replace('http://localhost:3333', window.location.origin);
+    }
+    return request;
+  }, []);
+
+  if (error) return <p className="apiStatus apiError">{error}</p>;
+  if (!specUrl) return <p className="apiStatus">Loading Swagger...</p>;
+
   return (
     <div className={className}>
       <SwaggerUI
-        url="/schemas/openapi.yaml"
+        url={specUrl}
         docExpansion="list"
         defaultModelsExpandDepth={-1}
+        requestInterceptor={requestInterceptor}
         tryItOutEnabled
       />
     </div>
@@ -2425,7 +2479,9 @@ function MonsterModal({ monster, onClose }) {
   const modalRef = useRef(null);
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
-  const imageUrl = getCaseInsensitiveField(monster, 'ImageUrl') ?? '';
+  const imageUrl = monster.ImageUrl
+    ? `/api/monsters/${monster.MonsterId}/image`
+    : '';
 
   useEffect(() => {
     setIsMDPopoutOpen(false);

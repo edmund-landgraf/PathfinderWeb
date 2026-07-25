@@ -5,6 +5,13 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPool, sql } from './db.js';
+import {
+  attachMonsterImageUrls,
+  createMonsterImageCache,
+  fetchMonsterImageFromDb,
+  getCachedMonsterThumbnail,
+  sendMonsterImageResponse
+} from './monsterImages.js';
 
 dotenv.config();
 
@@ -19,8 +26,7 @@ app.use(express.json());
 const DEBUG_SQL =
   String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
 
-const LOAD_AON_IMAGE_PREVIEW =
-  String(process.env.loadAoNImagePreview ?? 'true').toLowerCase() !== 'false';
+const monsterImageCache = createMonsterImageCache();
 
 const allowedSortColumns = new Set([
   'Name',
@@ -205,18 +211,6 @@ async function attachSourcePurchaseUrls(pool, rows) {
   const urlMap = await getSourcePurchaseUrlMap(pool);
   for (const row of rows) {
     row.SourcePurchaseURL = buildSourcePurchaseUrl(row.SourceBook, urlMap);
-  }
-
-  return rows;
-}
-
-function applyLoadAoNImagePreview(rows) {
-  if (LOAD_AON_IMAGE_PREVIEW || !rows?.length) return rows;
-
-  for (const row of rows) {
-    if ('ImageUrl' in row) {
-      row.ImageUrl = null;
-    }
   }
 
   return rows;
@@ -1436,8 +1430,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
-    applyLoadAoNImagePreview(rows);
-
+    await attachMonsterImageUrls(pool, rows);
     await attachSourcePurchaseUrls(pool, rows);
 
     logValue('Rows returned:', rows.length);
@@ -1484,7 +1477,75 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   npcMode: 'only'
 }));
 
-const schemasDir = [join(rootDir, 'schemas'), join(clientDistDir, 'schemas')].find(existsSync) ?? null;
+app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
+  const started = Date.now();
+  const monsterId = Number(req.params.monsterId);
+
+  logSection('GET /api/monsters/:monsterId/image/thumb');
+  logValue('monsterId:', req.params.monsterId);
+
+  if (!Number.isInteger(monsterId) || monsterId <= 0) {
+    res.status(400).json({ error: 'Invalid monsterId' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    const image = await getCachedMonsterThumbnail(pool, monsterImageCache, monsterId);
+
+    if (!image) {
+      res.status(404).json({ error: 'Monster image not found' });
+      return;
+    }
+
+    sendMonsterImageResponse(res, image, { cacheControl: 'public, max-age=86400' });
+    logValue('Bytes:', image.byteLength);
+    logValue('Content-Type:', image.contentType);
+    logValue('Cache hit:', image.cacheHit);
+    logValue('Elapsed ms:', Date.now() - started);
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.get('/api/monsters/:monsterId/image', async (req, res) => {
+  const started = Date.now();
+  const monsterId = Number(req.params.monsterId);
+
+  logSection('GET /api/monsters/:monsterId/image');
+  logValue('monsterId:', req.params.monsterId);
+
+  if (!Number.isInteger(monsterId) || monsterId <= 0) {
+    res.status(400).json({ error: 'Invalid monsterId' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    const image = await fetchMonsterImageFromDb(pool, monsterId);
+
+    if (!image) {
+      res.status(404).json({ error: 'Monster image not found' });
+      return;
+    }
+
+    sendMonsterImageResponse(res, image, { cacheControl: 'no-store' });
+    logValue('Bytes:', image.byteLength);
+    logValue('Content-Type:', image.contentType);
+    logValue('Elapsed ms:', Date.now() - started);
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
+const sourceSchemasDir = join(rootDir, 'schemas');
+const builtSchemasDir = join(clientDistDir, 'schemas');
+const schemaCandidates = process.env.npm_lifecycle_event === 'dev'
+  ? [sourceSchemasDir, builtSchemasDir]
+  : [builtSchemasDir, sourceSchemasDir];
+const schemasDir = schemaCandidates.find(existsSync) ?? null;
 if (schemasDir) {
   app.use('/schemas', express.static(schemasDir, {
     setHeaders(res, filePath) {
@@ -1531,5 +1592,5 @@ app.listen(port, () => {
     console.log(`Serving images from ${imagesDir}`);
   }
   console.log(`DEBUG_SQL=${DEBUG_SQL}`);
-  console.log(`loadAoNImagePreview=${LOAD_AON_IMAGE_PREVIEW}`);
+  console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
 });
