@@ -15,9 +15,7 @@ info:
 
 servers:
   - url: /
-    description: Same origin — production on port 3333, or Vite dev proxy
-  - url: http://localhost:3333
-    description: Direct Express server (UI + API after `npm run build && npm start`)
+    description: Same origin - always use this in api-docs (production port 3333 or Vite dev proxy)
 
 security: []
 

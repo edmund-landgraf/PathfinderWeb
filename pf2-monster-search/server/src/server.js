@@ -1578,7 +1578,7 @@ if (existsSync(clientDistDir)) {
   });
 }
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`PF2 search listening on http://localhost:${port}`);
   if (existsSync(clientDistDir)) {
     console.log(`Serving client from ${clientDistDir}`);
@@ -1593,4 +1593,14 @@ app.listen(port, () => {
   }
   console.log(`DEBUG_SQL=${DEBUG_SQL}`);
   console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${port} is already in use (likely a leftover server from another terminal).`);
+    console.error(`Free it in PowerShell: Get-NetTCPConnection -LocalPort ${port} | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+    console.error(`Or change PORT in server/.env and update client/vite.config.js proxy targets.`);
+    process.exit(1);
+  }
+  throw err;
 });
