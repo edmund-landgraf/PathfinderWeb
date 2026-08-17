@@ -13,7 +13,9 @@ import {
   sendMonsterImageResponse
 } from './monsterImages.js';
 
-dotenv.config();
+dotenv.config({
+  path: join(dirname(fileURLToPath(import.meta.url)), '../.env')
+});
 
 const app = express();
 const port = Number(process.env.PORT || 3333);
@@ -27,6 +29,22 @@ const DEBUG_SQL =
   String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
 
 const monsterImageCache = createMonsterImageCache();
+let creatureViewNamePromise;
+
+async function getCreatureViewName(pool) {
+  if (!creatureViewNamePromise) {
+    creatureViewNamePromise = pool.request()
+      .query(`
+        SELECT OBJECT_ID(N'pf2.vwMonsterList', N'V') AS ListViewId
+      `)
+      .then((result) => (
+        result.recordset?.[0]?.ListViewId ? 'pf2.vwMonsterList' : 'pf2.vwMonsterFull'
+      ))
+      .catch(() => 'pf2.vwMonsterFull');
+  }
+
+  return creatureViewNamePromise;
+}
 
 const allowedSortColumns = new Set([
   'Name',
@@ -1401,16 +1419,17 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     };
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const creatureView = await getCreatureViewName(pool);
 
     const query = `
       SELECT *
-      FROM pf2.vwMonsterFull
+      FROM ${creatureView}
       ${whereSql}
       ORDER BY ${orderBySql}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
       SELECT COUNT(*) AS Total
-      FROM pf2.vwMonsterFull
+      FROM ${creatureView}
       ${whereSql};
     `;
 

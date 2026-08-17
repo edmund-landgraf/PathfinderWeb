@@ -1,7 +1,11 @@
 import sql from 'mssql/msnodesqlv8.js';
 import dotenv from 'dotenv';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-dotenv.config();
+dotenv.config({
+  path: join(dirname(fileURLToPath(import.meta.url)), '../.env')
+});
 
 const trusted =
   String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() === 'true' ||

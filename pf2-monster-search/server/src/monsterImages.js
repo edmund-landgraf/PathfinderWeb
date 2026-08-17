@@ -54,7 +54,124 @@ export function createMonsterImageCache() {
   return new MonsterImageCache({ maxEntries });
 }
 
-export async function fetchMonsterImageFromDb(pool, monsterId) {
+const GENERIC_NAME_TOKENS = new Set([
+  'aapoph',
+  'adult',
+  'ancient',
+  'and',
+  'creature',
+  'dragon',
+  'drake',
+  'elemental',
+  'elite',
+  'from',
+  'giant',
+  'greater',
+  'lesser',
+  'monster',
+  'of',
+  'serpentfolk',
+  'the',
+  'weak',
+  'wyrmling',
+  'young'
+]);
+
+function distinctiveNameToken(name) {
+  const words = String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .split(/[\s-]+/)
+    .filter(Boolean);
+
+  const last = words[words.length - 1];
+  if (last && last.length >= 6 && !GENERIC_NAME_TOKENS.has(last)) {
+    return last;
+  }
+
+  return words
+    .filter((word) => word.length >= 8 && !GENERIC_NAME_TOKENS.has(word))
+    .sort((a, b) => b.length - a.length)[0] || null;
+}
+
+function toMonsterIdSet(rows, key) {
+  return new Set(
+    (rows || [])
+      .map((row) => Number(row[key]))
+      .filter((id) => Number.isInteger(id) && id > 0)
+  );
+}
+
+async function queryMonsterIdsWithImages(pool, ids) {
+  if (!ids.length) return new Set();
+
+  const request = pool.request();
+  const placeholders = ids.map((id, index) => {
+    const name = `mid${index}`;
+    request.input(name, sql.Int, id);
+    return `@${name}`;
+  });
+
+  const result = await request.query(`
+    SELECT MonsterID
+    FROM pf2.vwMonsterImagePresent
+    WHERE MonsterID IN (${placeholders.join(', ')})
+  `);
+
+  return toMonsterIdSet(result.recordset, 'MonsterID');
+}
+
+async function resolveRelatedImageMonsterIds(pool, missingRows) {
+  const relatedImageIds = new Map();
+  const candidates = [];
+
+  for (const row of missingRows) {
+    const monsterId = Number(row.MonsterId);
+    const level = Number(row.Level);
+    const token = distinctiveNameToken(row.Name);
+    if (!Number.isInteger(monsterId) || !Number.isInteger(level) || !token) {
+      continue;
+    }
+    candidates.push({ monsterId, level, token });
+  }
+
+  if (!candidates.length) return relatedImageIds;
+
+  const request = pool.request();
+  const clauses = candidates.map((candidate, index) => {
+    request.input(`lvl${index}`, sql.Int, candidate.level);
+    request.input(`tok${index}`, sql.NVarChar(100), `%${candidate.token}%`);
+    return `(m.Level = @lvl${index} AND m.Name LIKE @tok${index})`;
+  });
+
+  const siblings = await request.query(`
+    SELECT m.MonsterId, m.Name, m.Level
+    FROM pf2.vwMonsterHasImage m
+    WHERE (${clauses.join(' OR ')})
+  `);
+
+  const siblingsByKey = new Map();
+  for (const row of siblings.recordset || []) {
+    const token = distinctiveNameToken(row.Name);
+    if (!token) continue;
+    const key = `${token}|${Number(row.Level)}`;
+    const list = siblingsByKey.get(key) || [];
+    list.push(Number(row.MonsterId));
+    siblingsByKey.set(key, list);
+  }
+
+  for (const candidate of candidates) {
+    const matches = (siblingsByKey.get(`${candidate.token}|${candidate.level}`) || [])
+      .filter((id) => id !== candidate.monsterId);
+    if (matches.length === 1) {
+      relatedImageIds.set(candidate.monsterId, matches[0]);
+    }
+  }
+
+  return relatedImageIds;
+}
+
+async function fetchMonsterImageById(pool, monsterId) {
   const result = await pool.request()
     .input('monsterId', sql.Int, monsterId)
     .query(`
@@ -74,6 +191,33 @@ export async function fetchMonsterImageFromDb(pool, monsterId) {
     contentType: detectImageContentType(imageBuffer),
     byteLength: imageBuffer.length
   };
+}
+
+export async function fetchMonsterImageFromDb(pool, monsterId) {
+  const image = await fetchMonsterImageById(pool, monsterId);
+  if (image) {
+    return image;
+  }
+
+  try {
+    const identity = await pool.request()
+      .input('monsterId', sql.Int, monsterId)
+      .query(`
+        SELECT MonsterId, Name, Level
+        FROM pf2.Monster
+        WHERE MonsterId = @monsterId
+      `);
+    const relatedIds = await resolveRelatedImageMonsterIds(pool, identity.recordset || []);
+    const relatedId = relatedIds.get(monsterId);
+    if (!relatedId || relatedId === monsterId) {
+      return null;
+    }
+
+    return fetchMonsterImageById(pool, relatedId);
+  } catch (err) {
+    console.warn('Related monster image fetch failed:', err.message);
+    return null;
+  }
 }
 
 export async function getCachedMonsterThumbnail(pool, cache, monsterId) {
@@ -122,24 +266,19 @@ export async function attachMonsterImageUrls(pool, rows) {
 
   if (!ids.length) return rows;
 
-  const request = pool.request();
-  const placeholders = ids.map((id, index) => {
-    const name = `mid${index}`;
-    request.input(name, sql.Int, id);
-    return `@${name}`;
-  });
+  const hasImage = await queryMonsterIdsWithImages(pool, ids);
+  const missingRows = rows.filter((row) => !hasImage.has(Number(row.MonsterId)));
+  let relatedImageIds = new Map();
+  try {
+    relatedImageIds = await resolveRelatedImageMonsterIds(pool, missingRows);
+  } catch (err) {
+    console.warn('Related monster image lookup failed:', err.message);
+  }
 
-  const result = await request.query(`
-    SELECT MonsterID
-    FROM pf2.MonsterImage
-    WHERE MonsterID IN (${placeholders.join(', ')})
-      AND MonsterImage IS NOT NULL
-  `);
-
-  const hasImage = new Set((result.recordset || []).map((row) => row.MonsterID));
   for (const row of rows) {
-    if (hasImage.has(row.MonsterId)) {
-      row.ImageUrl = `/api/monsters/${row.MonsterId}/image/thumb`;
+    const monsterId = Number(row.MonsterId);
+    if (hasImage.has(monsterId) || relatedImageIds.has(monsterId)) {
+      row.ImageUrl = `/api/monsters/${monsterId}/image/thumb`;
     }
   }
 

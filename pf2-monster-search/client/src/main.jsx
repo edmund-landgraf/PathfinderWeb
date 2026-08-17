@@ -1889,7 +1889,7 @@ function MonsterSearchPage(props) {
       currentPage="monsters"
       apiPath="monsters"
       title="PF2 Monster Search"
-      subtitle="Search pf2.vwMonsterFull for creatures, excluding NPCs."
+      subtitle="Search pf2.vwMonsterList for creatures, excluding NPCs."
       detailTitle="Double-click to open full monster details"
     />
   );
@@ -1902,7 +1902,7 @@ function NpcSearchPage(props) {
       currentPage="npcs"
       apiPath="npcs"
       title="PF2 NPC Search"
-      subtitle="Search pf2.vwMonsterFull for NPCs."
+      subtitle="Search pf2.vwMonsterList for NPCs."
       detailTitle="Double-click to open full NPC details"
     />
   );
