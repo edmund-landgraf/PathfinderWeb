@@ -37,6 +37,7 @@ const emptyFilters = {
   size: '',
   alignment: '',
   family: '',
+  gameSystem: 'PF2',
   sourceBook: '',
   text: '',
   languages: '',
@@ -113,6 +114,7 @@ const columns = [
   ['Size', 'Size'],
   ['Alignment', 'Align'],
   ['Family', 'Family'],
+  ['GameSystem', 'Game'],
   ['SourceBook', 'Source'],
   ['HP', 'HP'],
   ['AC', 'AC'],
@@ -392,6 +394,25 @@ function BoolSelect({ value, onChange }) {
       <option value="true">Yes</option>
       <option value="false">No</option>
     </select>
+  );
+}
+
+function SegmentedInput({ value, onChange, options }) {
+  return (
+    <div className="segmentedInput" role="radiogroup">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={value === option.value ? 'segmentedOption active' : 'segmentedOption'}
+          role="radio"
+          aria-checked={value === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1783,6 +1804,16 @@ function CreatureSearchPage({
 
             <Field label="Family"><TextInput value={filters.family} onChange={v => setFilter('family', v)} placeholder="dragon, serpentfolk..." /></Field>
             <Field label="Source"><TextInput value={filters.sourceBook} onChange={v => setFilter('sourceBook', v)} placeholder="Monster Core" /></Field>
+            <Field label="Game">
+              <SegmentedInput
+                value={filters.gameSystem}
+                onChange={v => setFilter('gameSystem', v)}
+                options={[
+                  { value: 'PF2', label: 'PF2' },
+                  { value: 'SF2', label: 'SF2' }
+                ]}
+              />
+            </Field>
 
             <Field label="Languages"><TextInput value={filters.languages} onChange={v => setFilter('languages', v)} /></Field>
             <Field label="Skills"><TextInput value={filters.skills} onChange={v => setFilter('skills', v)} /></Field>

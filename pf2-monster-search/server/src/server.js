@@ -53,6 +53,7 @@ const allowedSortColumns = new Set([
   'Size',
   'Alignment',
   'Family',
+  'GameSystem',
   'SourceBook',
   'HP',
   'AC',
@@ -345,7 +346,7 @@ function buildFeatOrderBy(sortBy, sortDir) {
     Name: 'f.Name',
     Level: 'f.Level',
     FeatType: 'f.FeatType',
-    Rarity: 'r.Name',
+    Rarity: 'f.Rarity',
     SourceBook: 'sources.SourceBook',
     Traits: 'traits.Traits',
     PFS: 'f.PFS',
@@ -942,7 +943,7 @@ app.get('/api/feats', async (req, res) => {
     addIntFilter(request, where, debugParams, 'f.Level', 'levelMin', req.query.levelMin, '>=');
     addIntFilter(request, where, debugParams, 'f.Level', 'levelMax', req.query.levelMax, '<=');
     addStringFilter(request, where, debugParams, 'f.FeatType', 'featType', req.query.featType);
-    addStringFilter(request, where, debugParams, 'r.Name', 'rarity', req.query.rarity, true);
+    addStringFilter(request, where, debugParams, 'f.Rarity', 'rarity', req.query.rarity, true);
     addStringFilter(request, where, debugParams, 'sources.SourceBook', 'sourceBook', req.query.sourceBook);
     addStringFilter(request, where, debugParams, 'f.PFS', 'pfs', req.query.pfs);
     addBoolFilter(request, where, debugParams, 'f.IsStandardAncestryFeat', 'isStandardAncestryFeat', req.query.isStandardAncestryFeat);
@@ -1000,14 +1001,111 @@ app.get('/api/feats', async (req, res) => {
       value: offset
     };
 
+    const featDedupCteSql = `
+      WITH feat_base AS (
+        SELECT
+          f.FeatId,
+          f.AonId,
+          f.AonUrl,
+          f.Name,
+          f.Level,
+          f.FeatType,
+          f.RarityId,
+          r.Name AS Rarity,
+          f.SourceBookId,
+          sb.Name AS PrimarySourceBook,
+          sbp.StoreUrl AS PrimarySourcePurchaseURL,
+          f.SourcePage,
+          traits.Traits,
+          f.PFS,
+          f.IsStandardAncestryFeat,
+          f.Summary,
+          f.RemasterId,
+          f.RawHtml,
+          f.RawText,
+          f.RawMD,
+          f.RawJson,
+          MIN(f.FeatId) OVER (
+            PARTITION BY
+              f.Name,
+              ISNULL(f.Level, -2147483648),
+              ISNULL(f.FeatType, N''),
+              ISNULL(f.RarityId, -2147483648),
+              ISNULL(f.PFS, N''),
+              ISNULL(CAST(f.IsStandardAncestryFeat AS int), -1)
+          ) AS DuplicateGroupId,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              f.Name,
+              ISNULL(f.Level, -2147483648),
+              ISNULL(f.FeatType, N''),
+              ISNULL(f.RarityId, -2147483648),
+              ISNULL(f.PFS, N''),
+              ISNULL(CAST(f.IsStandardAncestryFeat AS int), -1)
+            ORDER BY f.FeatId
+          ) AS DuplicateRank
+        FROM pf2.Feat f
+        LEFT JOIN pf2.Rarity r
+          ON r.RarityId = f.RarityId
+        LEFT JOIN pf2.SourceBook sb
+          ON sb.SourceBookId = f.SourceBookId
+        LEFT JOIN pf2.SourceBookPurchase sbp
+          ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+        OUTER APPLY (
+          SELECT STRING_AGG(t.Name, ', ') AS Traits
+          FROM pf2.FeatTrait ft
+          INNER JOIN pf2.Trait t
+            ON t.TraitId = ft.TraitId
+          WHERE ft.FeatId = f.FeatId
+        ) traits
+      ),
+      feat_dedup AS (
+        SELECT *
+        FROM feat_base
+        WHERE DuplicateRank = 1
+      )
+    `;
+
+    const featSourcesOuterApplySql = `
+      OUTER APPLY (
+        SELECT
+          STRING_AGG(src.Name, ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name) AS SourceBook,
+          NULLIF(
+            STRING_AGG(CAST(ISNULL(src.StoreUrl, '') AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY src.SortOrder, src.Name),
+            ''
+          ) AS SourcePurchaseURL
+        FROM (
+          SELECT sourceRows.Name, MAX(sourceRows.StoreUrl) AS StoreUrl, MIN(sourceRows.SortOrder) AS SortOrder
+          FROM (
+            SELECT
+              x.PrimarySourceBook AS Name,
+              x.PrimarySourcePurchaseURL AS StoreUrl,
+              x.FeatId AS SortOrder
+            FROM feat_base x
+            WHERE x.DuplicateGroupId = f.DuplicateGroupId
+              AND x.PrimarySourceBook IS NOT NULL
+            UNION ALL
+            SELECT
+              lsb.Name,
+              lsbp.StoreUrl,
+              link.FeatSourceLinkId AS SortOrder
+            FROM feat_base x
+            INNER JOIN pf2.FeatSourceLink link
+              ON link.FeatId = x.FeatId
+            INNER JOIN pf2.SourceBook lsb
+              ON lsb.SourceBookId = link.SourceBookId
+            LEFT JOIN pf2.SourceBookPurchase lsbp
+              ON lsbp.SourceBookPurchaseId = lsb.SourcePurchaseID
+            WHERE x.DuplicateGroupId = f.DuplicateGroupId
+          ) sourceRows
+          WHERE sourceRows.Name IS NOT NULL
+          GROUP BY sourceRows.Name
+        ) src
+      ) sources
+    `;
+
     const fromSql = `
-      FROM pf2.Feat f
-      LEFT JOIN pf2.Rarity r
-        ON r.RarityId = f.RarityId
-      LEFT JOIN pf2.SourceBook sb
-        ON sb.SourceBookId = f.SourceBookId
-      LEFT JOIN pf2.SourceBookPurchase sbp
-        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+      FROM feat_dedup f
       OUTER APPLY (
         SELECT STRING_AGG(t.Name, ', ') AS Traits
         FROM pf2.FeatTrait ft
@@ -1015,23 +1113,18 @@ app.get('/api/feats', async (req, res) => {
           ON t.TraitId = ft.TraitId
         WHERE ft.FeatId = f.FeatId
       ) traits
-      ${sourcesOuterApplySql('f', 'FeatSourceLink', 'FeatId')}
+      ${featSourcesOuterApplySql}
     `;
 
     const countFromSql = `
-      FROM pf2.Feat f
-      LEFT JOIN pf2.Rarity r
-        ON r.RarityId = f.RarityId
-      LEFT JOIN pf2.SourceBook sb
-        ON sb.SourceBookId = f.SourceBookId
-      LEFT JOIN pf2.SourceBookPurchase sbp
-        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-      ${sourcesOuterApplySql('f', 'FeatSourceLink', 'FeatId')}
+      FROM feat_dedup f
+      ${featSourcesOuterApplySql}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const query = `
+      ${featDedupCteSql}
       SELECT
         f.FeatId,
         f.AonId,
@@ -1039,7 +1132,7 @@ app.get('/api/feats', async (req, res) => {
         f.Name,
         f.Level,
         f.FeatType,
-        r.Name AS Rarity,
+        f.Rarity,
         sources.SourceBook,
         sources.SourcePurchaseURL,
         f.SourcePage,
@@ -1057,6 +1150,7 @@ app.get('/api/feats', async (req, res) => {
       ORDER BY ${orderBySql}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
+      ${featDedupCteSql}
       SELECT COUNT(*) AS Total
       ${countFromSql}
       ${whereSql};
@@ -1365,6 +1459,27 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     addStringFilter(request, where, debugParams, 'Family', 'family', req.query.family);
     addStringFilter(request, where, debugParams, 'SourceBook', 'sourceBook', req.query.sourceBook);
 
+    if (req.query.gameSystem !== undefined && req.query.gameSystem !== null && String(req.query.gameSystem).trim() !== '') {
+      const gameSystem = String(req.query.gameSystem).trim().toUpperCase();
+
+      if (gameSystem === 'PF2' || gameSystem === 'SF2') {
+        request.input('gameSystem', sql.NVarChar(3), gameSystem);
+        where.push('GameSystem = @gameSystem');
+        debugParams.gameSystem = {
+          type: 'NVarChar',
+          value: gameSystem,
+          column: 'GameSystem',
+          calculatedFrom: 'SourceBook'
+        };
+      } else {
+        debugParams.gameSystem = {
+          skipped: true,
+          reason: 'expected PF2 or SF2',
+          value: req.query.gameSystem
+        };
+      }
+    }
+
     addFullTextFilter(request, where, debugParams, {
       paramName: 'text',
       table: 'pf2.Monster',
@@ -1420,16 +1535,33 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const creatureView = await getCreatureViewName(pool);
+    const sourceSystemSql = `
+      SELECT *,
+        CASE
+          WHEN SourceBook = N'Alien Core'
+            OR SourceBook LIKE N'Alien Core,%'
+            OR SourceBook LIKE N'%, Alien Core'
+            OR SourceBook LIKE N'%, Alien Core,%'
+            OR SourceBook LIKE N'%Starfinder%'
+          THEN N'SF2'
+          ELSE N'PF2'
+        END AS GameSystem
+      FROM ${creatureView}
+    `;
 
     const query = `
       SELECT *
-      FROM ${creatureView}
+      FROM (
+        ${sourceSystemSql}
+      ) creatures
       ${whereSql}
       ORDER BY ${orderBySql}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
 
       SELECT COUNT(*) AS Total
-      FROM ${creatureView}
+      FROM (
+        ${sourceSystemSql}
+      ) creatures
       ${whereSql};
     `;
 

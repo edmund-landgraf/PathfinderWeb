@@ -70,6 +70,37 @@ input, select {
 }
 input:focus, select:focus { border-color: #c78d4c; box-shadow: 0 0 0 2px rgba(199,141,76,.2); }
 select option { background: #211815; }
+.segmentedInput {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  min-height: 38px;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 10px;
+  background: rgba(0,0,0,.28);
+}
+.segmentedOption {
+  min-width: 0;
+  min-height: 30px;
+  justify-content: center;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  color: #cbbfb4;
+}
+.segmentedOption:hover:not(:disabled) {
+  background: rgba(255,255,255,.10);
+}
+.segmentedOption.active {
+  color: #fff5e8;
+  background: #8d4f26;
+  border-color: #c78d4c;
+}
 .actions { display: flex; gap: 8px; margin: 14px 0; }
 button {
   border: 1px solid rgba(255,255,255,.16);
