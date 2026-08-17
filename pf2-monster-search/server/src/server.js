@@ -394,6 +394,31 @@ function buildEquipmentOrderBy(sortBy, sortDir) {
   return parts.join(', ');
 }
 
+function addNameStartsWithFilter(request, where, debugParams, column, value) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+
+  const letter = String(value).trim().slice(0, 1).toUpperCase();
+  if (!/^[A-Z]$/.test(letter)) {
+    debugParams.nameStartsWith = {
+      skipped: true,
+      reason: 'expected A-Z',
+      value
+    };
+    return;
+  }
+
+  const sqlValue = `${letter}%`;
+  request.input('nameStartsWith', sql.NVarChar(2), sqlValue);
+  where.push(`${column} LIKE @nameStartsWith`);
+
+  debugParams.nameStartsWith = {
+    type: 'NVarChar',
+    value: sqlValue,
+    original: letter,
+    column
+  };
+}
+
 function addStringFilter(request, where, debugParams, column, paramName, value, exact = false) {
   if (value === undefined || value === null || String(value).trim() === '') return;
 
@@ -1449,6 +1474,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const debugParams = {};
 
     addStringFilter(request, where, debugParams, 'Name', 'name', req.query.name);
+    addNameStartsWithFilter(request, where, debugParams, 'Name', req.query.nameStartsWith);
     addIntFilter(request, where, debugParams, 'Level', 'levelMin', req.query.levelMin, '>=');
     addIntFilter(request, where, debugParams, 'Level', 'levelMax', req.query.levelMax, '<=');
 

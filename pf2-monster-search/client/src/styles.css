@@ -486,6 +486,29 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
   border-bottom: 1px solid rgba(255,255,255,.10);
   flex: 0 0 auto;
 }
+.letterBar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.letterBarOption {
+  min-width: 26px;
+  justify-content: center;
+  padding: 4px 7px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbbfb4;
+}
+.letterBarOption.active {
+  color: #fff5e8;
+  background: #8d4f26;
+  border-color: #c78d4c;
+}
 .error { color: #ffb4a9; }
 .pager { display: flex; gap: 8px; }
 .tableWrap { flex: 1; min-height: 0; overflow: auto; }

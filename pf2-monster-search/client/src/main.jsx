@@ -49,6 +49,7 @@ const emptyFilters = {
   acMin: '',
   acMax: '',
   isUnique: '',
+  nameStartsWith: '',
   limit: '100'
 };
 
@@ -394,6 +395,40 @@ function BoolSelect({ value, onChange }) {
       <option value="true">Yes</option>
       <option value="false">No</option>
     </select>
+  );
+}
+
+const alphabetLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+function AlphabetBar({ value, onChange, disabled }) {
+  const selected = value || '';
+
+  return (
+    <div className="letterBar" role="radiogroup" aria-label="Filter by first letter">
+      <button
+        type="button"
+        className={selected === '' ? 'letterBarOption active' : 'letterBarOption'}
+        role="radio"
+        aria-checked={selected === ''}
+        disabled={disabled}
+        onClick={() => onChange('')}
+      >
+        All
+      </button>
+      {alphabetLetters.map((letter) => (
+        <button
+          key={letter}
+          type="button"
+          className={selected === letter ? 'letterBarOption active' : 'letterBarOption'}
+          role="radio"
+          aria-checked={selected === letter}
+          disabled={disabled}
+          onClick={() => onChange(letter)}
+        >
+          {letter}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1663,11 +1698,11 @@ function CreatureSearchPage({
     setLookups(await res.json());
   }
 
-  async function search(newOffset = 0) {
+  async function search(newOffset = 0, nextFilters = filters) {
     setLoading(true);
     setError('');
     try {
-      const qs = buildQuery(filters, newOffset, sortBy, sortDir);
+      const qs = buildQuery(nextFilters, newOffset, sortBy, sortDir);
       const res = await fetch(`/api/${apiPath}?${qs}`);
       if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
@@ -1711,7 +1746,13 @@ function CreatureSearchPage({
     setRows([]);
     setTotal(0);
     setSelected(null);
-    setTimeout(() => search(0), 0);
+    search(0, emptyFilters);
+  }
+
+  function setNameStartsWith(letter) {
+    const nextFilters = { ...filters, nameStartsWith: letter };
+    setFilters(nextFilters);
+    search(0, nextFilters);
   }
 
   function changeSort(col) {
@@ -1843,6 +1884,7 @@ function CreatureSearchPage({
               <strong>{loading ? 'Loading...' : `${pageStart}-${pageEnd} of ${total}`}</strong>
               {error && <span className="error"> {error}</span>}
             </div>
+            <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
