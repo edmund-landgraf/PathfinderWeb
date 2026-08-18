@@ -34,6 +34,7 @@ const API_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 13000
 async function fetchApi(url, options = {}) {
   return fetch(url, {
     ...options,
+    credentials: 'include',
     signal: options.signal ?? AbortSignal.timeout(API_FETCH_TIMEOUT_MS)
   });
 }
@@ -472,7 +473,6 @@ const navItems = [
   { page: 'equipment', path: '/equipment', label: 'Equipment' }
 ];
 
-const ART_UNLOCK_STORAGE_KEY = 'pf2-art-unlocked';
 const ArtContext = createContext({
   artEnabled: true,
   showArtUnlock: false,
@@ -485,9 +485,7 @@ function useArt() {
 
 function ArtProvider({ children }) {
   const [enableArtByEnv, setEnableArtByEnv] = useState(null);
-  const [unlocked, setUnlocked] = useState(() => (
-    sessionStorage.getItem(ART_UNLOCK_STORAGE_KEY) === '1'
-  ));
+  const [unlocked, setUnlocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -498,7 +496,9 @@ function ArtProvider({ children }) {
         return res.json();
       })
       .then((data) => {
-        if (!cancelled) setEnableArtByEnv(Boolean(data.enableArt));
+        if (cancelled) return;
+        setEnableArtByEnv(Boolean(data.enableArt));
+        setUnlocked(Boolean(data.artUnlocked));
       })
       .catch(() => {
         if (!cancelled) setEnableArtByEnv(true);
@@ -520,8 +520,7 @@ function ArtProvider({ children }) {
       throw new Error(await readApiError(res));
     }
 
-    sessionStorage.setItem(ART_UNLOCK_STORAGE_KEY, '1');
-    setUnlocked(true);
+    window.location.reload();
     return true;
   }, []);
 

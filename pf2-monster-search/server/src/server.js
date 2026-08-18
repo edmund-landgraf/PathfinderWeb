@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ const port = Number(process.env.PORT || 3333);
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const clientDistDir = join(rootDir, 'client', 'dist');
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 const DEBUG_SQL =
@@ -33,12 +33,45 @@ const DEBUG_SQL =
 const ENABLE_ART =
   String(process.env.ENABLE_ART || 'true').toLowerCase() === 'true';
 const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
+const ART_COOKIE = 'pf2_art';
+const artUnlockTokens = new Set();
 
 function passwordsMatch(provided, expected) {
   const a = Buffer.from(String(provided ?? ''), 'utf8');
   const b = Buffer.from(String(expected ?? ''), 'utf8');
   if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+function parseCookies(req) {
+  const header = String(req.headers.cookie || '');
+  const cookies = {};
+  for (const part of header.split(';')) {
+    const index = part.indexOf('=');
+    if (index === -1) continue;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (!key) continue;
+    try {
+      cookies[key] = decodeURIComponent(value);
+    } catch {
+      cookies[key] = value;
+    }
+  }
+  return cookies;
+}
+
+function isArtEnabled(req) {
+  if (ENABLE_ART) return true;
+  const token = parseCookies(req)[ART_COOKIE];
+  return Boolean(token && artUnlockTokens.has(token));
+}
+
+function rejectArtIfLocked(req, res) {
+  if (isArtEnabled(req)) return false;
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(404).json({ error: 'Art is disabled' });
+  return true;
 }
 
 const monsterImageCache = createMonsterImageCache();
@@ -534,13 +567,16 @@ function addFullTextFilter(request, where, debugParams, {
   };
 }
 
-app.get('/api/config', (_req, res) => {
-  res.json({ enableArt: ENABLE_ART });
+app.get('/api/config', (req, res) => {
+  res.json({
+    enableArt: ENABLE_ART,
+    artUnlocked: isArtEnabled(req)
+  });
 });
 
 app.post('/api/art/unlock', (req, res) => {
   if (ENABLE_ART) {
-    res.json({ ok: true, enableArt: true });
+    res.json({ ok: true, enableArt: true, artUnlocked: true });
     return;
   }
 
@@ -549,7 +585,15 @@ app.post('/api/art/unlock', (req, res) => {
     return;
   }
 
-  res.json({ ok: true, enableArt: true });
+  const token = randomBytes(32).toString('hex');
+  artUnlockTokens.add(token);
+  res.cookie(ART_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 12 * 60 * 60 * 1000
+  });
+  res.json({ ok: true, enableArt: false, artUnlocked: true });
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -1641,7 +1685,9 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
-    await attachMonsterImageUrls(pool, rows);
+    if (isArtEnabled(req)) {
+      await attachMonsterImageUrls(pool, rows);
+    }
     await attachSourcePurchaseUrls(pool, rows);
 
     logValue('Rows returned:', rows.length);
@@ -1700,6 +1746,8 @@ app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
     return;
   }
 
+  if (rejectArtIfLocked(req, res)) return;
+
   try {
     const pool = await getPool();
     const image = await getCachedMonsterThumbnail(pool, monsterImageCache, monsterId);
@@ -1732,6 +1780,8 @@ app.get('/api/monsters/:monsterId/image', async (req, res) => {
     res.status(400).json({ error: 'Invalid monsterId' });
     return;
   }
+
+  if (rejectArtIfLocked(req, res)) return;
 
   try {
     const pool = await getPool();
@@ -1812,9 +1862,15 @@ async function startServer() {
         console.log(`Serving schemas from ${schemasDir}`);
       }
       if (imagesDir) {
-        console.log(`Serving images from ${imagesDir}`);
+        console.log(`Serving schema images from ${imagesDir}`);
       }
       console.log(`DEBUG_SQL=${DEBUG_SQL}`);
+      console.log(`ENABLE_ART=${ENABLE_ART}`);
+      console.log(
+        ENABLE_ART
+          ? 'Creature art: serving'
+          : 'Creature art: locked (not serving until password)'
+      );
       console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
       resolve(server);
     });
