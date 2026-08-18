@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,7 @@ import {
   getCachedMonsterThumbnail,
   sendMonsterImageResponse
 } from './monsterImages.js';
+import { freePort, isPortListening, sleep } from './freePort.mjs';
 
 dotenv.config({
   path: join(dirname(fileURLToPath(import.meta.url)), '../.env')
@@ -27,6 +29,17 @@ app.use(express.json());
 
 const DEBUG_SQL =
   String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
+
+const ENABLE_ART =
+  String(process.env.ENABLE_ART || 'true').toLowerCase() === 'true';
+const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
+
+function passwordsMatch(provided, expected) {
+  const a = Buffer.from(String(provided ?? ''), 'utf8');
+  const b = Buffer.from(String(expected ?? ''), 'utf8');
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const monsterImageCache = createMonsterImageCache();
 let creatureViewNamePromise;
@@ -521,6 +534,24 @@ function addFullTextFilter(request, where, debugParams, {
   };
 }
 
+app.get('/api/config', (_req, res) => {
+  res.json({ enableArt: ENABLE_ART });
+});
+
+app.post('/api/art/unlock', (req, res) => {
+  if (ENABLE_ART) {
+    res.json({ ok: true, enableArt: true });
+    return;
+  }
+
+  if (!passwordsMatch(req.body?.password, ENABLE_ART_PWD)) {
+    res.status(401).json({ error: 'Invalid password' });
+    return;
+  }
+
+  res.json({ ok: true, enableArt: true });
+});
+
 app.get('/api/health', async (_req, res) => {
   const started = Date.now();
 
@@ -742,6 +773,7 @@ app.get('/api/equipment', async (req, res) => {
     const debugParams = {};
 
     addStringFilter(request, where, debugParams, 'e.Name', 'name', req.query.name);
+    addNameStartsWithFilter(request, where, debugParams, 'e.Name', req.query.nameStartsWith);
     addIntFilter(request, where, debugParams, 'e.Level', 'levelMin', req.query.levelMin, '>=');
     addIntFilter(request, where, debugParams, 'e.Level', 'levelMax', req.query.levelMax, '<=');
     addStringFilter(request, where, debugParams, 'e.EquipmentType', 'equipmentType', req.query.equipmentType);
@@ -965,6 +997,7 @@ app.get('/api/feats', async (req, res) => {
     const debugParams = {};
 
     addStringFilter(request, where, debugParams, 'f.Name', 'name', req.query.name);
+    addNameStartsWithFilter(request, where, debugParams, 'f.Name', req.query.nameStartsWith);
     addIntFilter(request, where, debugParams, 'f.Level', 'levelMin', req.query.levelMin, '>=');
     addIntFilter(request, where, debugParams, 'f.Level', 'levelMax', req.query.levelMax, '<=');
     addStringFilter(request, where, debugParams, 'f.FeatType', 'featType', req.query.featType);
@@ -1245,6 +1278,7 @@ app.get('/api/spells', async (req, res) => {
     const debugParams = {};
 
     addStringFilter(request, where, debugParams, 's.Name', 'name', req.query.name);
+    addNameStartsWithFilter(request, where, debugParams, 's.Name', req.query.nameStartsWith);
     addIntFilter(request, where, debugParams, 's.Rank', 'rankMin', req.query.rankMin, '>=');
     addIntFilter(request, where, debugParams, 's.Rank', 'rankMax', req.query.rankMax, '<=');
     addStringFilter(request, where, debugParams, 's.SpellType', 'spellType', req.query.spellType);
@@ -1671,6 +1705,7 @@ app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
     const image = await getCachedMonsterThumbnail(pool, monsterImageCache, monsterId);
 
     if (!image) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
       res.status(404).json({ error: 'Monster image not found' });
       return;
     }
@@ -1703,6 +1738,7 @@ app.get('/api/monsters/:monsterId/image', async (req, res) => {
     const image = await fetchMonsterImageFromDb(pool, monsterId);
 
     if (!image) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
       res.status(404).json({ error: 'Monster image not found' });
       return;
     }
@@ -1755,29 +1791,48 @@ if (existsSync(clientDistDir)) {
   });
 }
 
-const server = app.listen(port, () => {
-  console.log(`PF2 search listening on http://localhost:${port}`);
-  if (existsSync(clientDistDir)) {
-    console.log(`Serving client from ${clientDistDir}`);
-  } else {
-    console.log('Client dist not found — API only. Run "npm run build" to serve the UI from this process.');
-  }
-  if (schemasDir) {
-    console.log(`Serving schemas from ${schemasDir}`);
-  }
-  if (imagesDir) {
-    console.log(`Serving images from ${imagesDir}`);
-  }
-  console.log(`DEBUG_SQL=${DEBUG_SQL}`);
-  console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
-});
+async function startServer() {
+  const isDev = process.env.NODE_ENV !== 'production';
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${port} is already in use (likely a leftover server from another terminal).`);
-    console.error(`Free it in PowerShell: Get-NetTCPConnection -LocalPort ${port} | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
-    console.error(`Or change PORT in server/.env and update client/vite.config.js proxy targets.`);
-    process.exit(1);
+  if (isDev && isPortListening(port)) {
+    console.log(`Port ${port} is in use — stopping the previous dev server...`);
+    freePort(port, { excludePids: [process.pid] });
+    await sleep(750);
   }
-  throw err;
+
+  await new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      console.log(`PF2 search listening on http://localhost:${port}`);
+      if (existsSync(clientDistDir)) {
+        console.log(`Serving client from ${clientDistDir}`);
+      } else {
+        console.log('Client dist not found — API only. Run "npm run build" to serve the UI from this process.');
+      }
+      if (schemasDir) {
+        console.log(`Serving schemas from ${schemasDir}`);
+      }
+      if (imagesDir) {
+        console.log(`Serving images from ${imagesDir}`);
+      }
+      console.log(`DEBUG_SQL=${DEBUG_SQL}`);
+      console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
+      resolve(server);
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${port} is still in use after cleanup.`);
+        console.error('Stop the running dev session first: npm run dev:stop');
+        console.error(`Or: Get-NetTCPConnection -LocalPort ${port} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+        process.exit(1);
+        return;
+      }
+      reject(err);
+    });
+  });
+}
+
+startServer().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });

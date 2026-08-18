@@ -5,7 +5,10 @@
   "description": "PF2 Archives of Nethys monster search UI for SQL Server",
   "scripts": {
     "install:all": "npm install && npm --prefix server install && npm --prefix client install",
-    "dev": "concurrently \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "predev": "node scripts/free-dev-ports.mjs",
+    "dev": "concurrently -k -n server,client -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "dev:stop": "node scripts/free-dev-ports.mjs",
+    "dev:trace": "node scripts/trace-dev-ports.mjs",
     "start": "npm --prefix server start",
     "build": "node scripts/generate-updates.mjs && node scripts/copy-schemas.mjs && node scripts/copy-images.mjs && npm --prefix client run build",
     "generate:updates": "node scripts/generate-updates.mjs",

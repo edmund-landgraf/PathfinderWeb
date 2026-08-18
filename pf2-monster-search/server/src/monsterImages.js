@@ -49,9 +49,20 @@ export function toNodeBuffer(value) {
   return null;
 }
 
+const missingImageIds = new Set();
+const MISSING_IMAGE_CACHE_MAX = 10000;
+
 export function createMonsterImageCache() {
   const maxEntries = Number(process.env.MONSTER_IMAGE_CACHE_MAX || 1000);
-  return new MonsterImageCache({ maxEntries });
+  const maxBytes = Number(process.env.MONSTER_IMAGE_CACHE_MAX_BYTES || 128 * 1024 * 1024);
+  return new MonsterImageCache({ maxEntries, maxBytes });
+}
+
+function rememberMissingImage(monsterId) {
+  if (missingImageIds.size >= MISSING_IMAGE_CACHE_MAX) {
+    missingImageIds.clear();
+  }
+  missingImageIds.add(monsterId);
 }
 
 const GENERIC_NAME_TOKENS = new Set([
@@ -221,6 +232,10 @@ export async function fetchMonsterImageFromDb(pool, monsterId) {
 }
 
 export async function getCachedMonsterThumbnail(pool, cache, monsterId) {
+  if (missingImageIds.has(monsterId)) {
+    return null;
+  }
+
   const cached = cache.get(monsterId);
   if (cached) {
     return { ...cached, cacheHit: true };
@@ -228,6 +243,7 @@ export async function getCachedMonsterThumbnail(pool, cache, monsterId) {
 
   const image = await fetchMonsterImageFromDb(pool, monsterId);
   if (!image) {
+    rememberMissingImage(monsterId);
     return null;
   }
 

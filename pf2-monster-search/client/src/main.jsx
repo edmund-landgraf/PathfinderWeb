@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
 import SwaggerUI from 'swagger-ui-react';
-import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound } from 'lucide-react';
+import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound, Settings } from 'lucide-react';
 import remarkGfm from 'remark-gfm';
 import 'swagger-ui-react/swagger-ui.css';
 import {
@@ -27,6 +27,15 @@ async function readApiError(res) {
   } catch {
     return text;
   }
+}
+
+const API_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 130000);
+
+async function fetchApi(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    signal: options.signal ?? AbortSignal.timeout(API_FETCH_TIMEOUT_MS)
+  });
 }
 
 const emptyFilters = {
@@ -66,6 +75,7 @@ const emptySpellFilters = {
   actions: '',
   defense: '',
   duration: '',
+  nameStartsWith: '',
   limit: '100'
 };
 
@@ -80,6 +90,7 @@ const emptyFeatFilters = {
   trait: '',
   pfs: '',
   isStandardAncestryFeat: '',
+  nameStartsWith: '',
   limit: '100'
 };
 
@@ -105,6 +116,7 @@ const emptyEquipmentFilters = {
   weaponType: '',
   damageType: '',
   armorCategory: '',
+  nameStartsWith: '',
   limit: '100'
 };
 
@@ -460,21 +472,176 @@ const navItems = [
   { page: 'equipment', path: '/equipment', label: 'Equipment' }
 ];
 
+const ART_UNLOCK_STORAGE_KEY = 'pf2-art-unlocked';
+const ArtContext = createContext({
+  artEnabled: true,
+  showArtUnlock: false,
+  unlockArt: async () => false
+});
+
+function useArt() {
+  return useContext(ArtContext);
+}
+
+function ArtProvider({ children }) {
+  const [enableArtByEnv, setEnableArtByEnv] = useState(null);
+  const [unlocked, setUnlocked] = useState(() => (
+    sessionStorage.getItem(ART_UNLOCK_STORAGE_KEY) === '1'
+  ));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchApi('/api/config')
+      .then((res) => {
+        if (!res.ok) throw new Error('Could not load config.');
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled) setEnableArtByEnv(Boolean(data.enableArt));
+      })
+      .catch(() => {
+        if (!cancelled) setEnableArtByEnv(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const unlockArt = useCallback(async (password) => {
+    const res = await fetchApi('/api/art/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+
+    if (!res.ok) {
+      throw new Error(await readApiError(res));
+    }
+
+    sessionStorage.setItem(ART_UNLOCK_STORAGE_KEY, '1');
+    setUnlocked(true);
+    return true;
+  }, []);
+
+  const value = useMemo(() => ({
+    artEnabled: enableArtByEnv === true || unlocked,
+    showArtUnlock: enableArtByEnv === false,
+    unlockArt
+  }), [enableArtByEnv, unlocked, unlockArt]);
+
+  return <ArtContext.Provider value={value}>{children}</ArtContext.Provider>;
+}
+
+function SettingsMenu() {
+  const { showArtUnlock, artEnabled, unlockArt } = useArt();
+  const [open, setOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    function handleClick(event) {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    }
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  if (!showArtUnlock) return null;
+
+  async function submitPassword(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+
+    try {
+      await unlockArt(password);
+      setPassword('');
+      setPasswordOpen(false);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message || 'Invalid password');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="settingsMenu" ref={menuRef}>
+      <button
+        type="button"
+        className="layoutButton"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Settings size={16} /> Settings
+      </button>
+
+      {open && (
+        <div className="settingsDropdown" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            disabled={artEnabled}
+            onClick={() => {
+              setOpen(false);
+              setPasswordOpen(true);
+              setError('');
+            }}
+          >
+            {artEnabled ? 'Art enabled' : 'Enable Art (requires password)'}
+          </button>
+        </div>
+      )}
+
+      {passwordOpen && (
+        <div className="modal-backdrop settingsPasswordBackdrop" onClick={() => setPasswordOpen(false)}>
+          <form className="settingsPasswordModal" onClick={(e) => e.stopPropagation()} onSubmit={submitPassword}>
+            <h2>Enable Art</h2>
+            <p>Enter the password to show preview and modal art.</p>
+            <input
+              type="password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+            />
+            {error && <p className="error">{error}</p>}
+            <div className="actions">
+              <button type="submit" className="primary" disabled={submitting || !password}>Enable</button>
+              <button type="button" onClick={() => setPasswordOpen(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NavBar({ currentPage, onNavigate, className = '' }) {
   return (
-    <nav className={`navBar ${className}`.trim()} aria-label="Primary">
-      {navItems.map(item => (
-        <button
-          key={item.page}
-          className={`layoutButton${item.page === currentPage ? ' navActive' : ''}`}
-          onClick={() => onNavigate(item.path)}
-          disabled={item.page === currentPage}
-          aria-current={item.page === currentPage ? 'page' : undefined}
-        >
-          {item.label}
-        </button>
-      ))}
-    </nav>
+    <div className={`topbarActions ${className}`.trim()}>
+      <nav className="navBar" aria-label="Primary">
+        {navItems.map(item => (
+          <button
+            key={item.page}
+            className={`layoutButton${item.page === currentPage ? ' navActive' : ''}`}
+            onClick={() => onNavigate(item.path)}
+            disabled={item.page === currentPage}
+            aria-current={item.page === currentPage ? 'page' : undefined}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <SettingsMenu />
+    </div>
   );
 }
 
@@ -491,6 +658,14 @@ function getCurrentPage() {
 }
 
 function App() {
+  return (
+    <ArtProvider>
+      <AppRoutes />
+    </ArtProvider>
+  );
+}
+
+function AppRoutes() {
   const [page, setPage] = useState(getCurrentPage);
 
   useEffect(() => {
@@ -541,6 +716,9 @@ function App() {
 function HomePage({ onNavigate }) {
   return (
     <div className="app homePage">
+      <header className="homeTopbar">
+        <SettingsMenu />
+      </header>
       <main className="homeShell">
         <div>
           <h1>PF2 Search</h1>
@@ -621,6 +799,7 @@ function UpdatesPage({ onNavigate }) {
     <div className="app updatesPage">
       <header className="updatesTopbar">
         <button className="updatesHomeButton" onClick={() => onNavigate('/')}>Home</button>
+        <SettingsMenu />
       </header>
 
       <main className="updatesShell">
@@ -730,6 +909,7 @@ function ApiPage({ onNavigate }) {
     <div className="app apiPage">
       <header className="apiTopbar">
         <button className="apiHomeButton" onClick={() => onNavigate('/')}>Home</button>
+        <SettingsMenu />
       </header>
 
       <main className="apiShell">
@@ -951,17 +1131,17 @@ function SpellsPage({ onNavigate }) {
   }
 
   async function fetchLookups() {
-    const res = await fetch('/api/spell-lookups');
+    const res = await fetchApi('/api/spell-lookups');
     if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
-  async function search(newOffset = 0) {
+  async function search(newOffset = 0, nextFilters = filters) {
     setLoading(true);
     setError('');
     try {
-      const qs = buildQuery(filters, newOffset, sortBy, sortDir);
-      const res = await fetch(`/api/spells?${qs}`);
+      const qs = buildQuery(nextFilters, newOffset, sortBy, sortDir);
+      const res = await fetchApi(`/api/spells?${qs}`);
       if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
@@ -1004,7 +1184,13 @@ function SpellsPage({ onNavigate }) {
     setRows([]);
     setTotal(0);
     setSelected(null);
-    setTimeout(() => search(0), 0);
+    search(0, emptySpellFilters);
+  }
+
+  function setNameStartsWith(letter) {
+    const nextFilters = { ...filters, nameStartsWith: letter };
+    setFilters(nextFilters);
+    search(0, nextFilters);
   }
 
   function changeSort(col) {
@@ -1110,6 +1296,7 @@ function SpellsPage({ onNavigate }) {
               <strong>{loading ? 'Loading...' : `${pageStart}-${pageEnd} of ${total}`}</strong>
               {error && <span className="error"> {error}</span>}
             </div>
+            <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1192,17 +1379,17 @@ function FeatsPage({ onNavigate }) {
   }
 
   async function fetchLookups() {
-    const res = await fetch('/api/feat-lookups');
+    const res = await fetchApi('/api/feat-lookups');
     if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
-  async function search(newOffset = 0) {
+  async function search(newOffset = 0, nextFilters = filters) {
     setLoading(true);
     setError('');
     try {
-      const qs = buildQuery(filters, newOffset, sortBy, sortDir);
-      const res = await fetch(`/api/feats?${qs}`);
+      const qs = buildQuery(nextFilters, newOffset, sortBy, sortDir);
+      const res = await fetchApi(`/api/feats?${qs}`);
       if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
@@ -1245,7 +1432,13 @@ function FeatsPage({ onNavigate }) {
     setRows([]);
     setTotal(0);
     setSelected(null);
-    setTimeout(() => search(0), 0);
+    search(0, emptyFeatFilters);
+  }
+
+  function setNameStartsWith(letter) {
+    const nextFilters = { ...filters, nameStartsWith: letter };
+    setFilters(nextFilters);
+    search(0, nextFilters);
   }
 
   function changeSort(col) {
@@ -1348,6 +1541,7 @@ function FeatsPage({ onNavigate }) {
               <strong>{loading ? 'Loading...' : `${pageStart}-${pageEnd} of ${total}`}</strong>
               {error && <span className="error"> {error}</span>}
             </div>
+            <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1432,17 +1626,17 @@ function EquipmentPage({ onNavigate }) {
   }
 
   async function fetchLookups() {
-    const res = await fetch('/api/equipment-lookups');
+    const res = await fetchApi('/api/equipment-lookups');
     if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
 
-  async function search(newOffset = 0) {
+  async function search(newOffset = 0, nextFilters = filters) {
     setLoading(true);
     setError('');
     try {
-      const qs = buildQuery(filters, newOffset, sortBy, sortDir);
-      const res = await fetch(`/api/equipment?${qs}`);
+      const qs = buildQuery(nextFilters, newOffset, sortBy, sortDir);
+      const res = await fetchApi(`/api/equipment?${qs}`);
       if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
@@ -1485,7 +1679,13 @@ function EquipmentPage({ onNavigate }) {
     setRows([]);
     setTotal(0);
     setSelected(null);
-    setTimeout(() => search(0), 0);
+    search(0, emptyEquipmentFilters);
+  }
+
+  function setNameStartsWith(letter) {
+    const nextFilters = { ...filters, nameStartsWith: letter };
+    setFilters(nextFilters);
+    search(0, nextFilters);
   }
 
   function changeSort(col) {
@@ -1601,6 +1801,7 @@ function EquipmentPage({ onNavigate }) {
               <strong>{loading ? 'Loading...' : `${pageStart}-${pageEnd} of ${total}`}</strong>
               {error && <span className="error"> {error}</span>}
             </div>
+            <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1693,7 +1894,7 @@ function CreatureSearchPage({
   }
 
   async function fetchLookups() {
-    const res = await fetch('/api/lookups');
+    const res = await fetchApi('/api/lookups');
     if (!res.ok) throw new Error(await readApiError(res));
     setLookups(await res.json());
   }
@@ -1703,7 +1904,7 @@ function CreatureSearchPage({
     setError('');
     try {
       const qs = buildQuery(nextFilters, newOffset, sortBy, sortDir);
-      const res = await fetch(`/api/${apiPath}?${qs}`);
+      const res = await fetchApi(`/api/${apiPath}?${qs}`);
       if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       setRows(data.rows || []);
@@ -1817,14 +2018,7 @@ function CreatureSearchPage({
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>
-        <div className="topbarActions">
-          <NavBar currentPage={currentPage} onNavigate={onNavigate} />
-          {/*
-          <button className="layoutButton" onClick={() => setLayout(layout === 'right' ? 'below' : 'right')}>
-            <Columns3 size={16} /> Grid {layout === 'right' ? 'right' : 'below'}
-          </button>
-          */}
-        </div>
+        <NavBar currentPage={currentPage} onNavigate={onNavigate} />
       </header>
 
       <main className="split splitRight">
@@ -1916,11 +2110,7 @@ function CreatureSearchPage({
                     title={detailTitle}
                   >
                     <td className="artCell">
-                      {row.ImageUrl ? (
-                        <img src={row.ImageUrl} alt={row.Name || ''} />
-                      ) : (
-                        <ImageIcon size={18} />
-                      )}
+                      <MonsterArtThumbnail imageUrl={row.ImageUrl} alt={row.Name || ''} />
                     </td>
 
                     {columns.map(([key]) => (
@@ -2128,7 +2318,7 @@ function DetailCard({ monster }) {
   return (
     <div className="detailCard">
       <div className="detailTop">
-        {monster.ImageUrl ? <img src={monster.ImageUrl} alt={monster.Name} /> : <div className="noArt"><ImageIcon /></div>}
+        <MonsterArtThumbnail imageUrl={monster.ImageUrl} alt={monster.Name} className="detailArt" />
         <div>
           <h2>{monster.Name}</h2>
           <div className="muted">Level {monster.Level ?? '?'} {monster.Rarity || ''} {monster.Size || ''}</div>
@@ -2434,14 +2624,49 @@ function splitEntityFields(record) {
   return { rawMD, normalFields, rawFields };
 }
 
+function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) {
+  const { artEnabled } = useArt();
+  const [failed, setFailed] = useState(false);
+  const emptyFrame = className.includes('detailArt')
+    ? <div className="noArt" aria-hidden="true" />
+    : <span className="artFrame" aria-hidden="true" />;
+
+  if (!artEnabled) return emptyFrame;
+
+  if (!imageUrl || failed) {
+    return className.includes('detailArt')
+      ? <div className="noArt"><ImageIcon size={size} /></div>
+      : <ImageIcon size={size} className={className} />;
+  }
+
+  return (
+    <img
+      className={className}
+      src={imageUrl}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function ModalArt({ imageUrl, alt, fallbackIcon, onImageOpen }) {
-  if (imageUrl) {
+  const { artEnabled } = useArt();
+  const [failed, setFailed] = useState(false);
+
+  if (!artEnabled) {
+    return <div className="modal-no-art" aria-hidden="true" />;
+  }
+
+  if (imageUrl && !failed) {
     return (
       <img
         className="modal-image modal-image-clickable"
         src={imageUrl}
         alt={alt}
         title="Double-click to view full size"
+        onError={() => setFailed(true)}
         onDoubleClick={(e) => {
           e.stopPropagation();
           onImageOpen();
@@ -2552,7 +2777,8 @@ function MonsterModal({ monster, onClose }) {
   const modalRef = useRef(null);
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
-  const imageUrl = monster.ImageUrl
+  const { artEnabled } = useArt();
+  const imageUrl = artEnabled && monster.ImageUrl
     ? `/api/monsters/${monster.MonsterId}/image`
     : '';
 

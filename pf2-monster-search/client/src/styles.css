@@ -126,7 +126,45 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
 }
 .topbarActions, .navBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .topbarActions .navBar { justify-content: flex-end; }
-.homeTopbar { justify-content: center; }
+.homeTopbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px 0;
+}
+
+.settingsMenu { position: relative; }
+.settingsDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 260px;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 12px;
+  background: #211815;
+  box-shadow: 0 12px 28px rgba(0,0,0,.4);
+}
+.settingsDropdown button {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+.settingsPasswordModal {
+  width: min(420px, 92vw);
+  padding: 22px;
+  border: 1px solid rgba(245,210,170,.32);
+  border-radius: 16px;
+  background: linear-gradient(145deg, #1d1512, #120d0b);
+  box-shadow: 0 22px 70px rgba(0,0,0,.65);
+}
+.settingsPasswordModal h2 {
+  margin: 0 0 8px;
+  color: #f5d2aa;
+  font-size: 22px;
+}
+.settingsPasswordModal p { margin: 0 0 12px; color: #cbbfb4; }
+.settingsPasswordModal .actions { margin: 14px 0 0; }
 
 .homePage,
 .placeholderPage {
@@ -200,7 +238,8 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
 
 .apiTopbar {
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
   padding: 16px;
 }
 
@@ -348,7 +387,8 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
 
 .updatesTopbar {
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
   padding: 16px;
 }
 
@@ -479,12 +519,19 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
 .resultsPanel { overflow: hidden; }
 .resultsHeader {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(255,255,255,.10);
   flex: 0 0 auto;
+}
+.resultsHeader > :first-child {
+  order: 1;
+}
+.resultsHeader .pager {
+  order: 2;
 }
 .letterBar {
   display: flex;
@@ -492,8 +539,9 @@ button.primary { background: #8d4f26; border-color: #c78d4c; }
   justify-content: center;
   align-items: center;
   gap: 3px;
-  flex: 1;
+  flex: 1 1 100%;
   min-width: 0;
+  order: 3;
 }
 .letterBarOption {
   min-width: 26px;
@@ -535,7 +583,18 @@ tr:hover { background: rgba(255,255,255,.07); }
 tr.selected { background: rgba(199,141,76,.17); }
 tr { cursor: pointer; }
 .artCell { width: 54px; text-align: center; }
-.artCell img { width: 38px; height: 38px; object-fit: cover; border-radius: 8px; }
+.artCell img, .artFrame {
+  width: 38px;
+  height: 38px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.artFrame {
+  display: inline-block;
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(255,255,255,.1);
+  vertical-align: middle;
+}
 .empty { text-align: center; color: #cbbfb4; padding: 30px; }
 
 .detailCard { margin-top: 14px; padding: 12px; }

@@ -32,6 +32,7 @@ if (trusted) {
     driver: 'msnodesqlv8',
 
     requestTimeout: Number(process.env.SQL_REQUEST_TIMEOUT_MS || 120000),
+    connectionTimeout: Number(process.env.SQL_CONNECTION_TIMEOUT_MS || 15000),
 
     options: {
       trustedConnection: true,
@@ -54,6 +55,7 @@ if (trusted) {
     password: process.env.SQL_PASSWORD,
 
     requestTimeout: Number(process.env.SQL_REQUEST_TIMEOUT_MS || 120000),
+    connectionTimeout: Number(process.env.SQL_CONNECTION_TIMEOUT_MS || 15000),
 
     options: {
       encrypt:
