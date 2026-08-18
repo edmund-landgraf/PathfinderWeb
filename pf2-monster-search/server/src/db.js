@@ -1,4 +1,3 @@
-import sql from 'mssql/msnodesqlv8.js';
 import dotenv from 'dotenv';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +13,10 @@ const trusted =
     !String(process.env.SQL_USER || '').trim() &&
     String(process.env.SQL_TRUSTED_CONNECTION || '').toLowerCase() !== 'false'
   );
+
+const { default: sql } = trusted
+  ? await import('mssql/msnodesqlv8.js')
+  : await import('mssql');
 
 let config;
 
@@ -41,8 +44,7 @@ if (trusted) {
       idleTimeoutMillis: 30000
     }
   };
-}
-else {
+} else {
   config = {
     server: process.env.SQL_SERVER || 'localhost',
     database: process.env.SQL_DATABASE || 'PathfinderUtil',
@@ -55,34 +57,49 @@ else {
 
     options: {
       encrypt:
-        String(process.env.SQL_ENCRYPT || '').toLowerCase() === 'true',
+        String(process.env.SQL_ENCRYPT || 'false').toLowerCase() === 'true',
 
       trustServerCertificate:
-        String(process.env.SQL_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() ===
-        'true'
+        String(
+          process.env.SQL_TRUST_SERVER_CERTIFICATE || 'true'
+        ).toLowerCase() === 'true',
+
+      enableArithAbort: true
     },
 
     pool: {
       max: 10,
       min: 0,
-      idleTimeoutMillis: 30000
+      idleTimeoutMillis: 30000,
+
+      // Required by current Tarn versions
+      createRetryIntervalMillis: 200
     }
   };
 }
 
-let poolPromise;
+let poolPromise = null;
 
 export async function getPool() {
   if (!poolPromise) {
+    console.log('=======================================');
     console.log('Connecting to SQL Server...');
     console.log(
       trusted
         ? 'Authentication: Windows Integrated Security'
         : `Authentication: SQL Login (${process.env.SQL_USER})`
     );
+    console.log(
+      `Server: ${config.server || process.env.SQL_SERVER}`
+    );
+    console.log(
+      `Database: ${config.database || process.env.SQL_DATABASE}`
+    );
+    console.log('=======================================');
 
     poolPromise = sql.connect(config).catch((err) => {
       poolPromise = null;
+      console.error(err);
       throw err;
     });
   }
