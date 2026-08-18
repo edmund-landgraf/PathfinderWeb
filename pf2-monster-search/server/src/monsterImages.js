@@ -182,17 +182,23 @@ async function resolveRelatedImageMonsterIds(pool, missingRows) {
   return relatedImageIds;
 }
 
-async function fetchMonsterImageById(pool, monsterId) {
+const IMAGE_COLUMNS = {
+  MonsterImage: 'MonsterImage',
+  MonsterThumbnail: 'MonsterThumbnail'
+};
+
+async function fetchMonsterImageById(pool, monsterId, column = IMAGE_COLUMNS.MonsterImage) {
+  const imageColumn = IMAGE_COLUMNS[column] || IMAGE_COLUMNS.MonsterImage;
   const result = await pool.request()
     .input('monsterId', sql.Int, monsterId)
     .query(`
-      SELECT MonsterImage
+      SELECT ${imageColumn}
       FROM pf2.MonsterImage
       WHERE MonsterID = @monsterId
-        AND MonsterImage IS NOT NULL
+        AND ${imageColumn} IS NOT NULL
     `);
 
-  const imageBuffer = toNodeBuffer(result.recordset?.[0]?.MonsterImage);
+  const imageBuffer = toNodeBuffer(result.recordset?.[0]?.[imageColumn]);
   if (!imageBuffer?.length) {
     return null;
   }
@@ -204,29 +210,56 @@ async function fetchMonsterImageById(pool, monsterId) {
   };
 }
 
+async function resolveRelatedMonsterImageId(pool, monsterId) {
+  const identity = await pool.request()
+    .input('monsterId', sql.Int, monsterId)
+    .query(`
+      SELECT MonsterId, Name, Level
+      FROM pf2.Monster
+      WHERE MonsterId = @monsterId
+    `);
+  const relatedIds = await resolveRelatedImageMonsterIds(pool, identity.recordset || []);
+  const relatedId = relatedIds.get(monsterId);
+  if (!relatedId || relatedId === monsterId) {
+    return null;
+  }
+  return relatedId;
+}
+
 export async function fetchMonsterImageFromDb(pool, monsterId) {
-  const image = await fetchMonsterImageById(pool, monsterId);
+  const image = await fetchMonsterImageById(pool, monsterId, IMAGE_COLUMNS.MonsterImage);
   if (image) {
     return image;
   }
 
   try {
-    const identity = await pool.request()
-      .input('monsterId', sql.Int, monsterId)
-      .query(`
-        SELECT MonsterId, Name, Level
-        FROM pf2.Monster
-        WHERE MonsterId = @monsterId
-      `);
-    const relatedIds = await resolveRelatedImageMonsterIds(pool, identity.recordset || []);
-    const relatedId = relatedIds.get(monsterId);
-    if (!relatedId || relatedId === monsterId) {
+    const relatedId = await resolveRelatedMonsterImageId(pool, monsterId);
+    if (!relatedId) {
       return null;
     }
 
-    return fetchMonsterImageById(pool, relatedId);
+    return fetchMonsterImageById(pool, relatedId, IMAGE_COLUMNS.MonsterImage);
   } catch (err) {
     console.warn('Related monster image fetch failed:', err.message);
+    return null;
+  }
+}
+
+async function fetchMonsterThumbnailFromDb(pool, monsterId) {
+  const thumbnail = await fetchMonsterImageById(pool, monsterId, IMAGE_COLUMNS.MonsterThumbnail);
+  if (thumbnail) {
+    return thumbnail;
+  }
+
+  try {
+    const relatedId = await resolveRelatedMonsterImageId(pool, monsterId);
+    if (!relatedId) {
+      return null;
+    }
+
+    return fetchMonsterImageById(pool, relatedId, IMAGE_COLUMNS.MonsterThumbnail);
+  } catch (err) {
+    console.warn('Related monster thumbnail fetch failed:', err.message);
     return null;
   }
 }
@@ -241,7 +274,7 @@ export async function getCachedMonsterThumbnail(pool, cache, monsterId) {
     return { ...cached, cacheHit: true };
   }
 
-  const image = await fetchMonsterImageFromDb(pool, monsterId);
+  const image = await fetchMonsterThumbnailFromDb(pool, monsterId);
   if (!image) {
     rememberMissingImage(monsterId);
     return null;

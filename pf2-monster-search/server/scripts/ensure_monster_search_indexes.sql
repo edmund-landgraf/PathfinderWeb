@@ -17,6 +17,61 @@ BEGIN
 END
 GO
 
+-- Blob/image columns cannot be index keys, included columns, or filtered-index predicates.
+-- Persist presence bits and index those instead.
+IF COL_LENGTH(N'pf2.MonsterImage', N'HasThumbnail') IS NULL
+BEGIN
+    ALTER TABLE pf2.MonsterImage
+        ADD HasThumbnail AS CONVERT(bit, CASE WHEN DATALENGTH(MonsterThumbnail) > 0 THEN 1 ELSE 0 END) PERSISTED;
+END
+GO
+
+IF COL_LENGTH(N'pf2.MonsterImage', N'HasImage') IS NULL
+BEGIN
+    ALTER TABLE pf2.MonsterImage
+        ADD HasImage AS CONVERT(bit, CASE WHEN DATALENGTH(MonsterImage) > 0 THEN 1 ELSE 0 END) PERSISTED;
+END
+GO
+
+-- Filtered indexes cannot reference computed columns; key the persisted bits instead.
+-- Clustered PK MonsterID is included automatically in each nonclustered index.
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'pf2.MonsterImage')
+      AND name = N'IX_MonsterImage_HasThumbnail'
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_MonsterImage_HasThumbnail
+        ON pf2.MonsterImage (HasThumbnail);
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'pf2.MonsterImage')
+      AND name = N'IX_MonsterImage_HasImage'
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_MonsterImage_HasImage
+        ON pf2.MonsterImage (HasImage);
+END
+GO
+
+-- Related-art sibling lookup: Level = @lvl AND Name LIKE @tok.
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'pf2.Monster')
+      AND name = N'IX_Monster_Level_Name'
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Monster_Level_Name
+        ON pf2.Monster (Level, Name);
+END
+GO
+
 IF NOT EXISTS (
     SELECT 1
     FROM sys.indexes
@@ -81,7 +136,8 @@ CREATE OR ALTER VIEW pf2.vwMonsterImagePresent
 AS
 SELECT MonsterID
 FROM pf2.MonsterImage
-WHERE MonsterImage IS NOT NULL;
+WHERE HasImage = 1
+   OR HasThumbnail = 1;
 GO
 
 CREATE OR ALTER VIEW pf2.vwMonsterHasImage

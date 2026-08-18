@@ -2317,7 +2317,11 @@ function DetailCard({ monster }) {
   return (
     <div className="detailCard">
       <div className="detailTop">
-        <MonsterArtThumbnail imageUrl={monster.ImageUrl} alt={monster.Name} className="detailArt" />
+        <MonsterArtThumbnail
+          imageUrl={monster.ImageUrl ? `/api/monsters/${monster.MonsterId}/image` : ''}
+          alt={monster.Name}
+          className="detailArt"
+        />
         <div>
           <h2>{monster.Name}</h2>
           <div className="muted">Level {monster.Level ?? '?'} {monster.Rarity || ''} {monster.Size || ''}</div>
