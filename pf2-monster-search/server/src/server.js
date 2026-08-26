@@ -9,6 +9,7 @@ import { getPool, sql } from './db.js';
 import {
   attachMonsterImageUrls,
   createMonsterImageCache,
+  detectImageContentType,
   fetchMonsterImageFromDb,
   getCachedMonsterThumbnail,
   sendMonsterImageResponse
@@ -25,7 +26,7 @@ const rootDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const clientDistDir = join(rootDir, 'client', 'dist');
 
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 const DEBUG_SQL =
   String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
@@ -35,6 +36,25 @@ const ENABLE_ART =
 const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
 const ART_COOKIE = 'pf2_art';
 const artUnlockTokens = new Set();
+
+function artCookieOptions(req) {
+  const origin = String(req.headers.origin || '');
+  const requestHost = String(req.get('host') || '');
+  let crossOrigin = false;
+  try {
+    crossOrigin = Boolean(origin) && new URL(origin).host !== requestHost;
+  } catch {
+    crossOrigin = Boolean(origin);
+  }
+
+  return {
+    httpOnly: true,
+    path: '/',
+    maxAge: 12 * 60 * 60 * 1000,
+    sameSite: crossOrigin ? 'none' : 'lax',
+    secure: crossOrigin || req.secure || requestHost.startsWith('localhost')
+  };
+}
 
 function passwordsMatch(provided, expected) {
   const a = Buffer.from(String(provided ?? ''), 'utf8');
@@ -106,7 +126,9 @@ const allowedSortColumns = new Set([
   'Fortitude',
   'Reflex',
   'Will',
-  'Perception'
+  'Perception',
+  'ContentType',
+  'SourceType'
 ]);
 
 const allowedSpellSortColumns = new Set([
@@ -149,6 +171,171 @@ const allowedEquipmentSortColumns = new Set([
   'ArmorCategory'
 ]);
 
+const USER_MONSTER_CONTENT_TYPE = 'user generated';
+let userMonsterSchemaPromise;
+
+function ensureUserMonsterSchema(pool) {
+  if (!userMonsterSchemaPromise) {
+    userMonsterSchemaPromise = pool.request().query(`
+      IF OBJECT_ID(N'pf2.UserMonster', N'U') IS NULL
+      BEGIN
+        CREATE TABLE pf2.UserMonster (
+          UserMonsterId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_UserMonster PRIMARY KEY,
+          ContentType nvarchar(30) NOT NULL CONSTRAINT DF_UserMonster_ContentType DEFAULT N'user generated',
+          Name nvarchar(255) NOT NULL,
+          Level int NULL,
+          Rarity nvarchar(100) NULL,
+          Size nvarchar(100) NULL,
+          Alignment nvarchar(100) NULL,
+          Family nvarchar(255) NULL,
+          SourceBook nvarchar(255) NULL,
+          SourcePage nvarchar(50) NULL,
+          GameSystem nvarchar(3) NOT NULL CONSTRAINT DF_UserMonster_GameSystem DEFAULT N'PF2',
+          IsUnique bit NULL,
+          IsNPC bit NOT NULL CONSTRAINT DF_UserMonster_IsNPC DEFAULT 0,
+          Perception int NULL,
+          Senses nvarchar(max) NULL,
+          Languages nvarchar(max) NULL,
+          Skills nvarchar(max) NULL,
+          Items nvarchar(max) NULL,
+          StrMod int NULL,
+          DexMod int NULL,
+          ConMod int NULL,
+          IntMod int NULL,
+          WisMod int NULL,
+          ChaMod int NULL,
+          AC int NULL,
+          Fortitude int NULL,
+          Reflex int NULL,
+          Will int NULL,
+          HP int NULL,
+          Immunities nvarchar(max) NULL,
+          Resistances nvarchar(max) NULL,
+          Weaknesses nvarchar(max) NULL,
+          Speed nvarchar(max) NULL,
+          RawMD nvarchar(max) NULL,
+          Image varbinary(max) NULL,
+          ImageContentType nvarchar(100) NULL,
+          CreatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserMonster_CreatedAt DEFAULT SYSUTCDATETIME(),
+          UpdatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserMonster_UpdatedAt DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT CK_UserMonster_ContentType CHECK (ContentType IN (N'user generated')),
+          CONSTRAINT CK_UserMonster_GameSystem CHECK (GameSystem IN (N'PF2', N'SF2'))
+        );
+      END;
+    `).catch((err) => {
+      userMonsterSchemaPromise = null;
+      throw err;
+    });
+  }
+
+  return userMonsterSchemaPromise;
+}
+
+function cleanString(value, maxLength = 4000) {
+  if (value === undefined || value === null) return null;
+  const clean = String(value).trim();
+  if (!clean) return null;
+  return clean.slice(0, maxLength);
+}
+
+function cleanInt(value, fieldName) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isInteger(n)) {
+    const err = new Error(`${fieldName} must be an integer.`);
+    err.statusCode = 400;
+    throw err;
+  }
+  return n;
+}
+
+function cleanBool(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(normalized)) return 1;
+  if (['false', '0', 'no'].includes(normalized)) return 0;
+  const err = new Error('Boolean fields must be true or false.');
+  err.statusCode = 400;
+  throw err;
+}
+
+function parseImagePayload(body) {
+  const raw = cleanString(body?.imageBase64 ?? body?.imageDataUrl, 20 * 1024 * 1024);
+  if (!raw) return { buffer: null, contentType: null };
+
+  const match = raw.match(/^data:([^;,]+);base64,(.+)$/i);
+  const declaredType = match ? match[1].toLowerCase() : cleanString(body?.imageContentType, 100)?.toLowerCase();
+  const base64 = match ? match[2] : raw;
+  const buffer = Buffer.from(base64, 'base64');
+  if (!buffer.length || buffer.length > 10 * 1024 * 1024) {
+    const err = new Error('Image must be a non-empty file up to 10 MB.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const detectedType = detectImageContentType(buffer);
+  const contentType = declaredType || detectedType;
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(contentType)) {
+    const err = new Error('Image must be PNG, JPEG, GIF, or WebP.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { buffer, contentType };
+}
+
+function buildUserMonsterPayload(body) {
+  const name = cleanString(body?.name ?? body?.Name, 255);
+  if (!name) {
+    const err = new Error('Name is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const gameSystem = (cleanString(body?.gameSystem ?? body?.GameSystem, 3) || 'PF2').toUpperCase();
+  if (gameSystem !== 'PF2' && gameSystem !== 'SF2') {
+    const err = new Error('GameSystem must be PF2 or SF2.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return {
+    name,
+    level: cleanInt(body?.level ?? body?.Level, 'Level'),
+    rarity: cleanString(body?.rarity ?? body?.Rarity, 100),
+    size: cleanString(body?.size ?? body?.Size, 100),
+    alignment: cleanString(body?.alignment ?? body?.Alignment, 100),
+    family: cleanString(body?.family ?? body?.Family, 255),
+    sourceBook: cleanString(body?.sourceBook ?? body?.SourceBook, 255) || USER_MONSTER_CONTENT_TYPE,
+    sourcePage: cleanString(body?.sourcePage ?? body?.SourcePage, 50),
+    gameSystem,
+    isUnique: cleanBool(body?.isUnique ?? body?.IsUnique),
+    isNpc: cleanBool(body?.isNpc ?? body?.isNPC ?? body?.IsNPC) ?? 0,
+    perception: cleanInt(body?.perception ?? body?.Perception, 'Perception'),
+    senses: cleanString(body?.senses ?? body?.Senses, 8000),
+    languages: cleanString(body?.languages ?? body?.Languages, 8000),
+    skills: cleanString(body?.skills ?? body?.Skills, 8000),
+    items: cleanString(body?.items ?? body?.Items, 8000),
+    strMod: cleanInt(body?.strMod ?? body?.StrMod, 'StrMod'),
+    dexMod: cleanInt(body?.dexMod ?? body?.DexMod, 'DexMod'),
+    conMod: cleanInt(body?.conMod ?? body?.ConMod, 'ConMod'),
+    intMod: cleanInt(body?.intMod ?? body?.IntMod, 'IntMod'),
+    wisMod: cleanInt(body?.wisMod ?? body?.WisMod, 'WisMod'),
+    chaMod: cleanInt(body?.chaMod ?? body?.ChaMod, 'ChaMod'),
+    ac: cleanInt(body?.ac ?? body?.AC, 'AC'),
+    fortitude: cleanInt(body?.fortitude ?? body?.Fortitude, 'Fortitude'),
+    reflex: cleanInt(body?.reflex ?? body?.Reflex, 'Reflex'),
+    will: cleanInt(body?.will ?? body?.Will, 'Will'),
+    hp: cleanInt(body?.hp ?? body?.HP, 'HP'),
+    immunities: cleanString(body?.immunities ?? body?.Immunities, 8000),
+    resistances: cleanString(body?.resistances ?? body?.Resistances, 8000),
+    weaknesses: cleanString(body?.weaknesses ?? body?.Weaknesses, 8000),
+    speed: cleanString(body?.speed ?? body?.Speed, 8000),
+    rawMD: cleanString(body?.rawMD ?? body?.RawMD ?? body?.description, 100000),
+    image: parseImagePayload(body)
+  };
+}
 function logSection(title) {
   if (!DEBUG_SQL) return;
   console.log('\n' + '='.repeat(100));
@@ -587,12 +774,7 @@ app.post('/api/art/unlock', (req, res) => {
 
   const token = randomBytes(32).toString('hex');
   artUnlockTokens.add(token);
-  res.cookie(ART_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 12 * 60 * 60 * 1000
-  });
+  res.cookie(ART_COOKIE, token, artCookieOptions(req));
   res.json({ ok: true, enableArt: false, artUnlocked: true });
 });
 
@@ -1546,6 +1728,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     logValue('Raw query params:', req.query);
 
     const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
     const request = pool.request();
 
     const where = [];
@@ -1584,14 +1767,29 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       }
     }
 
-    addFullTextFilter(request, where, debugParams, {
-      paramName: 'text',
-      table: 'pf2.Monster',
-      idColumn: 'MonsterId',
-      columns: ['Name', 'RawText'],
-      value: req.query.text,
-      outerColumn: 'MonsterId'
-    });
+    if (req.query.text !== undefined && req.query.text !== null && String(req.query.text).trim() !== '') {
+      const clean = String(req.query.text).trim();
+      const ft = `"${clean.replace(/"/g, '""')}*"`;
+      const textLike = `%${clean}%`;
+      request.input('text', sql.NVarChar(4000), ft);
+      request.input('textLike', sql.NVarChar, textLike);
+      where.push(`
+        (
+          (ContentType = N'canon' AND MonsterId IN (
+            SELECT MonsterId
+            FROM pf2.Monster
+            WHERE CONTAINS((Name, RawText), @text)
+          ))
+          OR
+          (ContentType = N'user generated' AND (Name LIKE @textLike OR RawMD LIKE @textLike))
+        )
+      `);
+      debugParams.text = {
+        type: 'FullTextOrLike',
+        value: ft,
+        userGeneratedValue: textLike
+      };
+    }
     addStringFilter(request, where, debugParams, 'Languages', 'languages', req.query.languages);
     addStringFilter(request, where, debugParams, 'Skills', 'skills', req.query.skills);
     addStringFilter(request, where, debugParams, 'Senses', 'senses', req.query.senses);
@@ -1607,6 +1805,25 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       mode: npcMode
     };
 
+    if (req.query.contentType !== undefined && req.query.contentType !== null && String(req.query.contentType).trim() !== '') {
+      const contentType = String(req.query.contentType).trim().toLowerCase();
+      if (contentType === 'canon' || contentType === USER_MONSTER_CONTENT_TYPE) {
+        request.input('contentType', sql.NVarChar(30), contentType);
+        where.push('ContentType = @contentType');
+        debugParams.contentType = {
+          type: 'NVarChar',
+          value: contentType,
+          column: 'ContentType',
+          exact: true
+        };
+      } else {
+        debugParams.contentType = {
+          skipped: true,
+          reason: 'expected canon or user generated',
+          value: req.query.contentType
+        };
+      }
+    }
     addBoolFilter(request, where, debugParams, 'IsUnique', 'isUnique', req.query.isUnique);
 
     addIntFilter(request, where, debugParams, 'HP', 'hpMin', req.query.hpMin, '>=');
@@ -1639,8 +1856,103 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const creatureView = await getCreatureViewName(pool);
+    const creatureColumns = `
+        MonsterId,
+        AonId,
+        AonUrl,
+        Name,
+        Level,
+        RarityId,
+        Rarity,
+        SizeId,
+        Size,
+        AlignmentId,
+        Alignment,
+        FamilyId,
+        Family,
+        SourceBookId,
+        SourceBook,
+        SourcePage,
+        IsUnique,
+        IsNPC,
+        ImageUrl,
+        Perception,
+        Senses,
+        Languages,
+        Skills,
+        Items,
+        StrMod,
+        DexMod,
+        ConMod,
+        IntMod,
+        WisMod,
+        ChaMod,
+        AC,
+        Fortitude,
+        Reflex,
+        Will,
+        HP,
+        Immunities,
+        Resistances,
+        Weaknesses,
+        Speed,
+        RawMD
+    `;
+
+    const userMonsterSourceSql = `
+      UNION ALL
+
+      SELECT
+        -um.UserMonsterId AS MonsterId,
+        CAST(NULL AS int) AS AonId,
+        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        um.Name,
+        um.Level,
+        CAST(NULL AS int) AS RarityId,
+        um.Rarity,
+        CAST(NULL AS int) AS SizeId,
+        um.Size,
+        CAST(NULL AS int) AS AlignmentId,
+        um.Alignment,
+        CAST(NULL AS int) AS FamilyId,
+        um.Family,
+        CAST(NULL AS int) AS SourceBookId,
+        um.SourceBook,
+        um.SourcePage,
+        um.IsUnique,
+        um.IsNPC,
+        CASE WHEN um.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', um.UserMonsterId, N'/image/thumb') END AS ImageUrl,
+        um.Perception,
+        um.Senses,
+        um.Languages,
+        um.Skills,
+        um.Items,
+        um.StrMod,
+        um.DexMod,
+        um.ConMod,
+        um.IntMod,
+        um.WisMod,
+        um.ChaMod,
+        um.AC,
+        um.Fortitude,
+        um.Reflex,
+        um.Will,
+        um.HP,
+        um.Immunities,
+        um.Resistances,
+        um.Weaknesses,
+        um.Speed,
+        um.RawMD,
+        um.GameSystem,
+        um.ContentType,
+        N'my monsters' AS SourceType,
+        um.UserMonsterId
+      FROM pf2.UserMonster um
+    `;
+
     const sourceSystemSql = `
-      SELECT *,
+      SELECT
+        ${creatureColumns},
         CASE
           WHEN SourceBook = N'Alien Core'
             OR SourceBook LIKE N'Alien Core,%'
@@ -1649,8 +1961,12 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
             OR SourceBook LIKE N'%Starfinder%'
           THEN N'SF2'
           ELSE N'PF2'
-        END AS GameSystem
+        END AS GameSystem,
+        N'canon' AS ContentType,
+        N'canon' AS SourceType,
+        CAST(NULL AS int) AS UserMonsterId
       FROM ${creatureView}
+      ${userMonsterSourceSql}
     `;
 
     const query = `
@@ -1723,6 +2039,187 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     });
   }
 }
+
+async function fetchUserMonsterById(pool, userMonsterId) {
+  await ensureUserMonsterSchema(pool);
+  const result = await pool.request()
+    .input('userMonsterId', sql.Int, userMonsterId)
+    .query(`
+      SELECT
+        -UserMonsterId AS MonsterId,
+        UserMonsterId,
+        CAST(NULL AS int) AS AonId,
+        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        Name,
+        Level,
+        CAST(NULL AS int) AS RarityId,
+        Rarity,
+        CAST(NULL AS int) AS SizeId,
+        Size,
+        CAST(NULL AS int) AS AlignmentId,
+        Alignment,
+        CAST(NULL AS int) AS FamilyId,
+        Family,
+        CAST(NULL AS int) AS SourceBookId,
+        SourceBook,
+        SourcePage,
+        IsUnique,
+        IsNPC,
+        CASE WHEN Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', UserMonsterId, N'/image/thumb') END AS ImageUrl,
+        Perception,
+        Senses,
+        Languages,
+        Skills,
+        Items,
+        StrMod,
+        DexMod,
+        ConMod,
+        IntMod,
+        WisMod,
+        ChaMod,
+        AC,
+        Fortitude,
+        Reflex,
+        Will,
+        HP,
+        Immunities,
+        Resistances,
+        Weaknesses,
+        Speed,
+        RawMD,
+        GameSystem,
+        ContentType,
+        N'my monsters' AS SourceType,
+        CreatedAt,
+        UpdatedAt
+      FROM pf2.UserMonster
+      WHERE UserMonsterId = @userMonsterId;
+    `);
+
+  return result.recordset?.[0] || null;
+}
+
+app.post('/api/user-monsters', async (req, res) => {
+  const started = Date.now();
+
+  try {
+    logSection('POST /api/user-monsters');
+
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const payload = buildUserMonsterPayload(req.body || {});
+
+    const request = pool.request()
+      .input('name', sql.NVarChar(255), payload.name)
+      .input('level', sql.Int, payload.level)
+      .input('rarity', sql.NVarChar(100), payload.rarity)
+      .input('size', sql.NVarChar(100), payload.size)
+      .input('alignment', sql.NVarChar(100), payload.alignment)
+      .input('family', sql.NVarChar(255), payload.family)
+      .input('sourceBook', sql.NVarChar(255), payload.sourceBook)
+      .input('sourcePage', sql.NVarChar(50), payload.sourcePage)
+      .input('gameSystem', sql.NVarChar(3), payload.gameSystem)
+      .input('isUnique', sql.Bit, payload.isUnique)
+      .input('isNpc', sql.Bit, payload.isNpc)
+      .input('perception', sql.Int, payload.perception)
+      .input('senses', sql.NVarChar(sql.MAX), payload.senses)
+      .input('languages', sql.NVarChar(sql.MAX), payload.languages)
+      .input('skills', sql.NVarChar(sql.MAX), payload.skills)
+      .input('items', sql.NVarChar(sql.MAX), payload.items)
+      .input('strMod', sql.Int, payload.strMod)
+      .input('dexMod', sql.Int, payload.dexMod)
+      .input('conMod', sql.Int, payload.conMod)
+      .input('intMod', sql.Int, payload.intMod)
+      .input('wisMod', sql.Int, payload.wisMod)
+      .input('chaMod', sql.Int, payload.chaMod)
+      .input('ac', sql.Int, payload.ac)
+      .input('fortitude', sql.Int, payload.fortitude)
+      .input('reflex', sql.Int, payload.reflex)
+      .input('will', sql.Int, payload.will)
+      .input('hp', sql.Int, payload.hp)
+      .input('immunities', sql.NVarChar(sql.MAX), payload.immunities)
+      .input('resistances', sql.NVarChar(sql.MAX), payload.resistances)
+      .input('weaknesses', sql.NVarChar(sql.MAX), payload.weaknesses)
+      .input('speed', sql.NVarChar(sql.MAX), payload.speed)
+      .input('rawMD', sql.NVarChar(sql.MAX), payload.rawMD)
+      .input('image', sql.VarBinary(sql.MAX), payload.image.buffer)
+      .input('imageContentType', sql.NVarChar(100), payload.image.contentType);
+
+    const result = await request.query(`
+      INSERT INTO pf2.UserMonster (
+        Name, Level, Rarity, Size, Alignment, Family, SourceBook, SourcePage, GameSystem,
+        IsUnique, IsNPC, Perception, Senses, Languages, Skills, Items,
+        StrMod, DexMod, ConMod, IntMod, WisMod, ChaMod,
+        AC, Fortitude, Reflex, Will, HP,
+        Immunities, Resistances, Weaknesses, Speed, RawMD, Image, ImageContentType
+      )
+      OUTPUT INSERTED.UserMonsterId
+      VALUES (
+        @name, @level, @rarity, @size, @alignment, @family, @sourceBook, @sourcePage, @gameSystem,
+        @isUnique, @isNpc, @perception, @senses, @languages, @skills, @items,
+        @strMod, @dexMod, @conMod, @intMod, @wisMod, @chaMod,
+        @ac, @fortitude, @reflex, @will, @hp,
+        @immunities, @resistances, @weaknesses, @speed, @rawMD, @image, @imageContentType
+      );
+    `);
+
+    const userMonsterId = result.recordset?.[0]?.UserMonsterId;
+    const row = await fetchUserMonsterById(pool, userMonsterId);
+
+    logValue('Created user monster:', userMonsterId);
+    logValue('Elapsed ms:', Date.now() - started);
+    res.status(201).json(row);
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+});
+
+async function sendUserMonsterImage(req, res, { cacheControl }) {
+  const userMonsterId = Number(req.params.userMonsterId);
+
+  if (!Number.isInteger(userMonsterId) || userMonsterId <= 0) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('userMonsterId', sql.Int, userMonsterId)
+      .query(`
+        SELECT Image, ImageContentType
+        FROM pf2.UserMonster
+        WHERE UserMonsterId = @userMonsterId
+          AND Image IS NOT NULL;
+      `);
+
+    const buffer = result.recordset?.[0]?.Image;
+    if (!buffer?.length) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(404).json({ error: 'User monster image not found' });
+      return;
+    }
+
+    sendMonsterImageResponse(res, {
+      buffer,
+      contentType: result.recordset[0].ImageContentType || detectImageContentType(buffer),
+      byteLength: buffer.length
+    }, { cacheControl });
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+}
+
+app.get('/api/user-monsters/:userMonsterId/image/thumb', (req, res) => {
+  sendUserMonsterImage(req, res, { cacheControl: 'public, max-age=86400' });
+});
+
+app.get('/api/user-monsters/:userMonsterId/image', (req, res) => {
+  sendUserMonsterImage(req, res, { cacheControl: 'no-store' });
+});
 
 app.get('/api/monsters', (req, res) => queryCreatures(req, res, {
   routeLabel: 'GET /api/monsters',

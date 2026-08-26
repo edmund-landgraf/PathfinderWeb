@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
 import SwaggerUI from 'swagger-ui-react';
-import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound, Settings } from 'lucide-react';
+import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound, Settings, Plus } from 'lucide-react';
 import remarkGfm from 'remark-gfm';
 import 'swagger-ui-react/swagger-ui.css';
 import {
@@ -60,6 +60,7 @@ const emptyFilters = {
   acMax: '',
   isUnique: '',
   nameStartsWith: '',
+  contentType: '',
   limit: '100'
 };
 
@@ -129,6 +130,7 @@ const columns = [
   ['Alignment', 'Align'],
   ['Family', 'Family'],
   ['GameSystem', 'Game'],
+  ['SourceType', 'Source Type'],
   ['SourceBook', 'Source'],
   ['HP', 'HP'],
   ['AC', 'AC'],
@@ -441,6 +443,37 @@ function AlphabetBar({ value, onChange, disabled }) {
           {letter}
         </button>
       ))}
+    </div>
+  );
+}
+
+function RowRangeBar({ enabled, total, limit, offset, loading, onChange }) {
+  if (enabled === false || total <= limit) return null;
+
+  const pageCount = Math.ceil(total / limit);
+  const currentPage = Math.floor(offset / limit) + 1;
+
+  return (
+    <div className="rowRangeBar" aria-label="Jump by 100-row group">
+      {Array.from({ length: pageCount }, (_, index) => {
+        const pageNumber = index + 1;
+        const rangeStart = index * limit + 1;
+        const rangeEnd = Math.min((index + 1) * limit, total);
+
+        return (
+          <button
+            key={pageNumber}
+            type="button"
+            className={currentPage === pageNumber ? 'rowRangeOption active' : 'rowRangeOption'}
+            disabled={loading}
+            aria-current={currentPage === pageNumber ? 'page' : undefined}
+            title={String(rangeStart) + '-' + String(rangeEnd)}
+            onClick={() => onChange(index * limit)}
+          >
+            {pageNumber}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1296,6 +1329,14 @@ function SpellsPage({ onNavigate }) {
               {error && <span className="error"> {error}</span>}
             </div>
             <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
+            <RowRangeBar
+              enabled={Boolean(filters.nameStartsWith)}
+              total={total}
+              limit={limit}
+              offset={offset}
+              loading={loading}
+              onChange={search}
+            />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1541,6 +1582,14 @@ function FeatsPage({ onNavigate }) {
               {error && <span className="error"> {error}</span>}
             </div>
             <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
+            <RowRangeBar
+              enabled={Boolean(filters.nameStartsWith)}
+              total={total}
+              limit={limit}
+              offset={offset}
+              loading={loading}
+              onChange={search}
+            />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1801,6 +1850,14 @@ function EquipmentPage({ onNavigate }) {
               {error && <span className="error"> {error}</span>}
             </div>
             <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
+            <RowRangeBar
+              enabled={Boolean(filters.nameStartsWith)}
+              total={total}
+              limit={limit}
+              offset={offset}
+              loading={loading}
+              onChange={search}
+            />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -1862,13 +1919,148 @@ function EquipmentPage({ onNavigate }) {
   );
 }
 
+const emptyUserMonsterForm = {
+  name: '',
+  level: '',
+  rarity: '',
+  size: '',
+  alignment: '',
+  family: '',
+  sourceBook: '',
+  gameSystem: 'PF2',
+  isUnique: false,
+  hp: '',
+  ac: '',
+  fortitude: '',
+  reflex: '',
+  will: '',
+  perception: '',
+  speed: '',
+  senses: '',
+  languages: '',
+  skills: '',
+  rawMD: '',
+  imageDataUrl: ''
+};
+
+function TextAreaInput({ value, onChange, placeholder, rows = 4 }) {
+  return <textarea value={value} rows={rows} placeholder={placeholder || ''} onChange={e => onChange(e.target.value)} />;
+}
+
+function getMonsterImageUrl(monster, variant = 'thumb') {
+  if (!monster?.ImageUrl) return '';
+  if (monster.SourceType === 'my monsters' || monster.ContentType === 'user generated') return monster.ImageUrl.replace('/image/thumb', '/image');
+  return variant === 'full' ? `/api/monsters/${monster.MonsterId}/image` : monster.ImageUrl;
+}
+
+function AddUserMonsterModal({ lookups, onClose, onCreated }) {
+  const [form, setForm] = useState(emptyUserMonsterForm);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  function setField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function readImage(file) {
+    if (!file) {
+      setField('imageDataUrl', '');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => setField('imageDataUrl', String(reader.result || ''));
+    reader.onerror = () => setError('Could not read image file.');
+    reader.readAsDataURL(file);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+
+    try {
+      const payload = {
+        ...form,
+        isUnique: Boolean(form.isUnique),
+        isNpc: false
+      };
+      const res = await fetchApi('/api/user-monsters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      const created = await res.json();
+      onCreated(created);
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="userMonsterModal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="userMonsterModalHeader">
+          <div>
+            <h2>Add User Monster</h2>
+            <p>Content type: user generated</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="userMonsterGrid">
+          <Field label="Name"><TextInput value={form.name} onChange={v => setField('name', v)} placeholder="Creature name" /></Field>
+          <Field label="Level"><TextInput value={form.level} onChange={v => setField('level', v)} /></Field>
+          <Field label="Rarity"><SelectInput value={form.rarity} onChange={v => setField('rarity', v)} options={lookups.rarity} /></Field>
+          <Field label="Size"><SelectInput value={form.size} onChange={v => setField('size', v)} options={lookups.size} /></Field>
+          <Field label="Alignment"><SelectInput value={form.alignment} onChange={v => setField('alignment', v)} options={lookups.alignment} /></Field>
+          <Field label="Family"><TextInput value={form.family} onChange={v => setField('family', v)} /></Field>
+          <Field label="Source"><TextInput value={form.sourceBook} onChange={v => setField('sourceBook', v)} placeholder="My Monsters" /></Field>
+          <Field label="Game"><SegmentedInput value={form.gameSystem} onChange={v => setField('gameSystem', v)} options={[{ value: 'PF2', label: 'PF2' }, { value: 'SF2', label: 'SF2' }]} /></Field>
+          <Field label="HP"><TextInput value={form.hp} onChange={v => setField('hp', v)} /></Field>
+          <Field label="AC"><TextInput value={form.ac} onChange={v => setField('ac', v)} /></Field>
+          <Field label="Fort"><TextInput value={form.fortitude} onChange={v => setField('fortitude', v)} /></Field>
+          <Field label="Ref"><TextInput value={form.reflex} onChange={v => setField('reflex', v)} /></Field>
+          <Field label="Will"><TextInput value={form.will} onChange={v => setField('will', v)} /></Field>
+          <Field label="Perception"><TextInput value={form.perception} onChange={v => setField('perception', v)} /></Field>
+          <Field label="Speed"><TextInput value={form.speed} onChange={v => setField('speed', v)} /></Field>
+          <label className="field checkboxField"><span>Unique</span><input type="checkbox" checked={form.isUnique} onChange={e => setField('isUnique', e.target.checked)} /></label>
+        </div>
+
+        <div className="userMonsterWideFields">
+          <Field label="Senses"><TextInput value={form.senses} onChange={v => setField('senses', v)} /></Field>
+          <Field label="Languages"><TextInput value={form.languages} onChange={v => setField('languages', v)} /></Field>
+          <Field label="Skills"><TextInput value={form.skills} onChange={v => setField('skills', v)} /></Field>
+          <Field label="Description / Raw MD"><TextAreaInput value={form.rawMD} onChange={v => setField('rawMD', v)} placeholder="# Creature Name" rows={7} /></Field>
+          <label className="field imageUploadField">
+            <span>Image</span>
+            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={e => readImage(e.target.files?.[0])} />
+            {form.imageDataUrl && <img src={form.imageDataUrl} alt="Preview" />}
+          </label>
+        </div>
+
+        {error && <p className="error">{error}</p>}
+
+        <div className="actions userMonsterActions">
+          <button type="submit" className="primary" disabled={submitting || !form.name}><Plus size={16} /> Add Monster</button>
+          <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function CreatureSearchPage({
   onNavigate,
   currentPage,
   apiPath,
   title,
   subtitle,
-  detailTitle = 'Double-click to open full details'
+  detailTitle = 'Double-click to open full details',
+  allowUserAdd = false
 }) {
   const [filters, setFilters] = useState(emptyFilters);
   const [lookups, setLookups] = useState({ rarity: [], size: [], alignment: [], family: [], sourceBook: [] });
@@ -1881,6 +2073,7 @@ function CreatureSearchPage({
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
   const [selectedMonster, setSelectedMonster] = useState(null);
+  const [isAddUserMonsterOpen, setIsAddUserMonsterOpen] = useState(false);
   // Grid layout toggle (right/below) — disabled for now
   // const [layout, setLayout] = useState('right');
   const searchRef = useRef(null);
@@ -1964,6 +2157,12 @@ function CreatureSearchPage({
     }
   }
 
+  function handleUserMonsterCreated(monster) {
+    setIsAddUserMonsterOpen(false);
+    search(0);
+    setSelected(monster);
+    setSelectedMonster(monster);
+  }
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
@@ -2038,6 +2237,17 @@ function CreatureSearchPage({
 
             <Field label="Family"><TextInput value={filters.family} onChange={v => setFilter('family', v)} placeholder="dragon, serpentfolk..." /></Field>
             <Field label="Source"><TextInput value={filters.sourceBook} onChange={v => setFilter('sourceBook', v)} placeholder="Monster Core" /></Field>
+            <Field label="My monsters">
+              <SegmentedInput
+                value={filters.contentType}
+                onChange={v => setFilter('contentType', v)}
+                options={[
+                  { value: '', label: 'Include' },
+                  { value: 'user generated', label: 'Only mine' },
+                  { value: 'canon', label: 'Canon only' }
+                ]}
+              />
+            </Field>
             <Field label="Game">
               <SegmentedInput
                 value={filters.gameSystem}
@@ -2066,6 +2276,11 @@ function CreatureSearchPage({
           <div className="actions">
             <button className="primary" onClick={() => search(0)} disabled={loading}><Search size={16} /> Search</button>
             <button onClick={reset} disabled={loading}><RotateCcw size={16} /> Reset</button>
+            {allowUserAdd && (
+              <button type="button" onClick={() => setIsAddUserMonsterOpen(true)} disabled={loading}>
+                <Plus size={16} /> Add user monster
+              </button>
+            )}
           </div>
 
           {selected && <DetailCard monster={selected} />}
@@ -2078,6 +2293,14 @@ function CreatureSearchPage({
               {error && <span className="error"> {error}</span>}
             </div>
             <AlphabetBar value={filters.nameStartsWith} onChange={setNameStartsWith} disabled={loading} />
+            <RowRangeBar
+              enabled={Boolean(filters.nameStartsWith)}
+              total={total}
+              limit={limit}
+              offset={offset}
+              loading={loading}
+              onChange={search}
+            />
             <div className="pager">
               <button disabled={loading || offset === 0} onClick={() => search(Math.max(0, offset - limit))}>Prev</button>
               <button disabled={loading || offset + limit >= total} onClick={() => search(offset + limit)}>Next</button>
@@ -2134,6 +2357,14 @@ function CreatureSearchPage({
       </main>
     </div>
 
+    {allowUserAdd && isAddUserMonsterOpen && (
+      <AddUserMonsterModal
+        lookups={lookups}
+        onClose={() => setIsAddUserMonsterOpen(false)}
+        onCreated={handleUserMonsterCreated}
+      />
+    )}
+
     {selectedMonster && (
       <MonsterModal
         monster={selectedMonster}
@@ -2153,6 +2384,7 @@ function MonsterSearchPage(props) {
       title="PF2 Monster Search"
       subtitle="Search pf2.vwMonsterList for creatures, excluding NPCs."
       detailTitle="Double-click to open full monster details"
+      allowUserAdd
     />
   );
 }
@@ -2318,7 +2550,7 @@ function DetailCard({ monster }) {
     <div className="detailCard">
       <div className="detailTop">
         <MonsterArtThumbnail
-          imageUrl={monster.ImageUrl ? `/api/monsters/${monster.MonsterId}/image` : ''}
+          imageUrl={getMonsterImageUrl(monster, 'full')}
           alt={monster.Name}
           className="detailArt"
         />
@@ -2781,9 +3013,7 @@ function MonsterModal({ monster, onClose }) {
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
   const { artEnabled } = useArt();
-  const imageUrl = artEnabled && monster.ImageUrl
-    ? `/api/monsters/${monster.MonsterId}/image`
-    : '';
+  const imageUrl = artEnabled ? getMonsterImageUrl(monster, 'full') : '';
 
   useEffect(() => {
     setIsMDPopoutOpen(false);

@@ -300,7 +300,7 @@ export function sendMonsterImageResponse(res, image, { cacheControl }) {
 
 export async function attachMonsterImageUrls(pool, rows) {
   for (const row of rows) {
-    if ('ImageUrl' in row) {
+    if ('ImageUrl' in row && row.ContentType !== 'user generated') {
       row.ImageUrl = null;
     }
   }
@@ -309,6 +309,7 @@ export async function attachMonsterImageUrls(pool, rows) {
 
   const ids = [...new Set(
     rows
+      .filter((row) => row.ContentType !== 'user generated')
       .map((row) => Number(row.MonsterId))
       .filter((id) => Number.isInteger(id) && id > 0)
   )];

@@ -1,8 +1,52 @@
 {
-  "generatedAt": "2026-06-16T04:55:09.739Z",
+  "generatedAt": "2026-08-26T20:41:08.440Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-08-18",
+        "comment": "Add password-gated art toggle and keep ENABLE_ART out of committed env."
+      },
+      {
+        "date": "2026-08-18",
+        "comment": "Serve grid art from MonsterThumbnail and index image presence bits."
+      },
+      {
+        "date": "2026-08-18",
+        "comment": "Stop serving creature art until ENABLE_ART is true or the password unlock cookie is set."
+      },
+      {
+        "date": "2026-08-18",
+        "comment": "Support SQL Server on Linux and Windows"
+      },
+      {
+        "date": "2026-08-17",
+        "comment": "Add A-Z first-letter filter to creature search results."
+      },
+      {
+        "date": "2026-08-17",
+        "comment": "Add creature system filter and feat source dedup"
+      },
+      {
+        "date": "2026-08-16",
+        "comment": "Use vwMonsterList when available and fall back to related monster art."
+      },
+      {
+        "date": "2026-07-28",
+        "comment": "Improve port-in-use startup errors and simplify OpenAPI server URLs."
+      },
+      {
+        "date": "2026-07-25",
+        "comment": "Serve monster art from MonsterImage table with cached thumbnails."
+      },
+      {
+        "date": "2026-06-18",
+        "comment": "Add loadAoNImagePreview toggle and gitignore generated schema PNGs."
+      },
+      {
+        "date": "2026-06-16",
+        "comment": "Add API docs UI with OpenAPI spec, Swagger try-it, and dbschema image library."
+      },
       {
         "date": "2026-06-15",
         "comment": "Add database maintenance scripts and schema documentation."
@@ -72,6 +116,34 @@
   "utilities": {
     "title": "Pathfinder Utilities",
     "entries": [
+      {
+        "date": "2026-08-17",
+        "comment": "Add Demiplane missing creature importer"
+      },
+      {
+        "date": "2026-08-17",
+        "comment": "Add Demiplane monster image importer"
+      },
+      {
+        "date": "2026-08-17",
+        "comment": "Skip failed Demiplane creature images"
+      },
+      {
+        "date": "2026-08-16",
+        "comment": "Add 1e beast scrapers and monster image import script."
+      },
+      {
+        "date": "2026-08-16",
+        "comment": "Add AoN source update tooling"
+      },
+      {
+        "date": "2026-08-16",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-08-16",
+        "comment": "Stop collapsing AoN named variants onto a shared page URL."
+      },
       {
         "date": "2026-06-15",
         "comment": "Initial commit"
