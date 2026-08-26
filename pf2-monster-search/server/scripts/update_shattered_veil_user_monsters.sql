@@ -52,7 +52,7 @@ END
 UPDATE pf2.UserMonster
 SET
     SourceBook = @title,
-    AonUrl = @url,
+    AonUrl = NULL,
     UpdatedAt = SYSUTCDATETIME()
 WHERE Name IN (
     N'Thornwick Echo',

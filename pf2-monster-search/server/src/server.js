@@ -464,21 +464,12 @@ function buildSourcePurchaseUrl(sourceBook, urlMap) {
   return urls.join(', ');
 }
 
-function firstHttpUrl(value) {
-  if (!value) return null;
-  return String(value)
-    .split(',')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith('http')) || null;
-}
-
 async function attachSourcePurchaseUrls(pool, rows) {
   if (!rows.length) return rows;
 
   const urlMap = await getSourcePurchaseUrlMap(pool);
   for (const row of rows) {
     row.SourcePurchaseURL = buildSourcePurchaseUrl(row.SourceBook, urlMap);
-    row.AonUrl = row.AonUrl || firstHttpUrl(row.SourcePurchaseURL);
   }
 
   return rows;
@@ -1921,16 +1912,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       SELECT
         -um.UserMonsterId AS MonsterId,
         CAST(NULL AS int) AS AonId,
-        COALESCE(
-          um.AonUrl,
-          (
-            SELECT TOP (1) sbp.StoreUrl
-            FROM pf2.SourceBook sb
-            INNER JOIN pf2.SourceBookPurchase sbp
-              ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-            WHERE sb.Name = um.SourceBook
-          )
-        ) AS AonUrl,
+        um.AonUrl,
         um.Name,
         um.Level,
         CAST(NULL AS int) AS RarityId,
@@ -2074,16 +2056,7 @@ async function fetchUserMonsterById(pool, userMonsterId) {
         -UserMonsterId AS MonsterId,
         UserMonsterId,
         CAST(NULL AS int) AS AonId,
-        COALESCE(
-          AonUrl,
-          (
-            SELECT TOP (1) sbp.StoreUrl
-            FROM pf2.SourceBook sb
-            INNER JOIN pf2.SourceBookPurchase sbp
-              ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-            WHERE sb.Name = SourceBook
-          )
-        ) AS AonUrl,
+        AonUrl,
         Name,
         Level,
         CAST(NULL AS int) AS RarityId,

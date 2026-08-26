@@ -2563,7 +2563,9 @@ function DetailCard({ monster }) {
             {monster.IsNPC && <span>NPC</span>}
             {monster.IsUnique && <span>Unique</span>}
           </div>
-          {monster.AonUrl && <a href={monster.AonUrl} target="_blank" rel="noreferrer">{externalSourceLabel(monster.AonUrl)} <ExternalLink size={13} /></a>}
+          {monster.AonUrl && !isDuplicateSourceUrl(monster.AonUrl, monster.SourcePurchaseURL) && (
+            <a href={monster.AonUrl} target="_blank" rel="noreferrer">Open AoN <ExternalLink size={13} /></a>
+          )}
         </div>
       </div>
       <div className="statLine">
@@ -2589,10 +2591,12 @@ function DetailCard({ monster }) {
   );
 }
 
-function externalSourceLabel(url) {
-  if (/pathfinderinfinite\.com/i.test(url || '')) return 'Pathfinder Infinite';
-  if (/aonprd\.com|archivesofnethys/i.test(url || '')) return 'Open AoN';
-  return 'Open source';
+function isDuplicateSourceUrl(aonUrl, sourcePurchaseUrl) {
+  if (!aonUrl) return true;
+  return String(sourcePurchaseUrl || '')
+    .split(',')
+    .map((part) => part.trim())
+    .includes(aonUrl);
 }
 
 function isUrlField(key, value) {
@@ -3071,9 +3075,9 @@ function MonsterModal({ monster, onClose }) {
                 {monster.IsUnique && <span className="modal-pill">Unique</span>}
               </div>
 
-              {monster.AonUrl && (
+              {monster.AonUrl && !isDuplicateSourceUrl(monster.AonUrl, monster.SourcePurchaseURL) && (
                 <a className="modal-link" href={monster.AonUrl} target="_blank" rel="noreferrer">
-                  {externalSourceLabel(monster.AonUrl)} <ExternalLink size={13} />
+                  Open AoN <ExternalLink size={13} />
                 </a>
               )}
             </div>
