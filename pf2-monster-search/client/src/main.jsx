@@ -2563,7 +2563,7 @@ function DetailCard({ monster }) {
             {monster.IsNPC && <span>NPC</span>}
             {monster.IsUnique && <span>Unique</span>}
           </div>
-          {monster.AonUrl && <a href={monster.AonUrl} target="_blank" rel="noreferrer">Open AoN <ExternalLink size={13} /></a>}
+          {monster.AonUrl && <a href={monster.AonUrl} target="_blank" rel="noreferrer">{externalSourceLabel(monster.AonUrl)} <ExternalLink size={13} /></a>}
         </div>
       </div>
       <div className="statLine">
@@ -2587,6 +2587,12 @@ function DetailCard({ monster }) {
       </div>
     </div>
   );
+}
+
+function externalSourceLabel(url) {
+  if (/pathfinderinfinite\.com/i.test(url || '')) return 'Pathfinder Infinite';
+  if (/aonprd\.com|archivesofnethys/i.test(url || '')) return 'Open AoN';
+  return 'Open source';
 }
 
 function isUrlField(key, value) {
@@ -3067,7 +3073,7 @@ function MonsterModal({ monster, onClose }) {
 
               {monster.AonUrl && (
                 <a className="modal-link" href={monster.AonUrl} target="_blank" rel="noreferrer">
-                  Open AoN <ExternalLink size={13} />
+                  {externalSourceLabel(monster.AonUrl)} <ExternalLink size={13} />
                 </a>
               )}
             </div>

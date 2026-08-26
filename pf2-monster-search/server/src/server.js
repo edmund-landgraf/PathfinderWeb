@@ -190,6 +190,7 @@ function ensureUserMonsterSchema(pool) {
           Family nvarchar(255) NULL,
           SourceBook nvarchar(255) NULL,
           SourcePage nvarchar(50) NULL,
+          AonUrl nvarchar(2048) NULL,
           GameSystem nvarchar(3) NOT NULL CONSTRAINT DF_UserMonster_GameSystem DEFAULT N'PF2',
           IsUnique bit NULL,
           IsNPC bit NOT NULL CONSTRAINT DF_UserMonster_IsNPC DEFAULT 0,
@@ -221,6 +222,11 @@ function ensureUserMonsterSchema(pool) {
           CONSTRAINT CK_UserMonster_ContentType CHECK (ContentType IN (N'user generated')),
           CONSTRAINT CK_UserMonster_GameSystem CHECK (GameSystem IN (N'PF2', N'SF2'))
         );
+      END;
+
+      IF COL_LENGTH(N'pf2.UserMonster', N'AonUrl') IS NULL
+      BEGIN
+        ALTER TABLE pf2.UserMonster ADD AonUrl nvarchar(2048) NULL;
       END;
     `).catch((err) => {
       userMonsterSchemaPromise = null;
@@ -309,6 +315,7 @@ function buildUserMonsterPayload(body) {
     family: cleanString(body?.family ?? body?.Family, 255),
     sourceBook: cleanString(body?.sourceBook ?? body?.SourceBook, 255) || USER_MONSTER_CONTENT_TYPE,
     sourcePage: cleanString(body?.sourcePage ?? body?.SourcePage, 50),
+    aonUrl: cleanString(body?.aonUrl ?? body?.AonUrl, 2048),
     gameSystem,
     isUnique: cleanBool(body?.isUnique ?? body?.IsUnique),
     isNpc: cleanBool(body?.isNpc ?? body?.isNPC ?? body?.IsNPC) ?? 0,
@@ -457,12 +464,21 @@ function buildSourcePurchaseUrl(sourceBook, urlMap) {
   return urls.join(', ');
 }
 
+function firstHttpUrl(value) {
+  if (!value) return null;
+  return String(value)
+    .split(',')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('http')) || null;
+}
+
 async function attachSourcePurchaseUrls(pool, rows) {
   if (!rows.length) return rows;
 
   const urlMap = await getSourcePurchaseUrlMap(pool);
   for (const row of rows) {
     row.SourcePurchaseURL = buildSourcePurchaseUrl(row.SourceBook, urlMap);
+    row.AonUrl = row.AonUrl || firstHttpUrl(row.SourcePurchaseURL);
   }
 
   return rows;
@@ -1905,7 +1921,16 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       SELECT
         -um.UserMonsterId AS MonsterId,
         CAST(NULL AS int) AS AonId,
-        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        COALESCE(
+          um.AonUrl,
+          (
+            SELECT TOP (1) sbp.StoreUrl
+            FROM pf2.SourceBook sb
+            INNER JOIN pf2.SourceBookPurchase sbp
+              ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+            WHERE sb.Name = um.SourceBook
+          )
+        ) AS AonUrl,
         um.Name,
         um.Level,
         CAST(NULL AS int) AS RarityId,
@@ -2049,7 +2074,16 @@ async function fetchUserMonsterById(pool, userMonsterId) {
         -UserMonsterId AS MonsterId,
         UserMonsterId,
         CAST(NULL AS int) AS AonId,
-        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        COALESCE(
+          AonUrl,
+          (
+            SELECT TOP (1) sbp.StoreUrl
+            FROM pf2.SourceBook sb
+            INNER JOIN pf2.SourceBookPurchase sbp
+              ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+            WHERE sb.Name = SourceBook
+          )
+        ) AS AonUrl,
         Name,
         Level,
         CAST(NULL AS int) AS RarityId,
@@ -2096,7 +2130,11 @@ async function fetchUserMonsterById(pool, userMonsterId) {
       WHERE UserMonsterId = @userMonsterId;
     `);
 
-  return result.recordset?.[0] || null;
+  const row = result.recordset?.[0] || null;
+  if (row) {
+    await attachSourcePurchaseUrls(pool, [row]);
+  }
+  return row;
 }
 
 app.post('/api/user-monsters', async (req, res) => {
@@ -2118,6 +2156,7 @@ app.post('/api/user-monsters', async (req, res) => {
       .input('family', sql.NVarChar(255), payload.family)
       .input('sourceBook', sql.NVarChar(255), payload.sourceBook)
       .input('sourcePage', sql.NVarChar(50), payload.sourcePage)
+      .input('aonUrl', sql.NVarChar(2048), payload.aonUrl)
       .input('gameSystem', sql.NVarChar(3), payload.gameSystem)
       .input('isUnique', sql.Bit, payload.isUnique)
       .input('isNpc', sql.Bit, payload.isNpc)
@@ -2147,7 +2186,7 @@ app.post('/api/user-monsters', async (req, res) => {
 
     const result = await request.query(`
       INSERT INTO pf2.UserMonster (
-        Name, Level, Rarity, Size, Alignment, Family, SourceBook, SourcePage, GameSystem,
+        Name, Level, Rarity, Size, Alignment, Family, SourceBook, SourcePage, AonUrl, GameSystem,
         IsUnique, IsNPC, Perception, Senses, Languages, Skills, Items,
         StrMod, DexMod, ConMod, IntMod, WisMod, ChaMod,
         AC, Fortitude, Reflex, Will, HP,
@@ -2155,7 +2194,7 @@ app.post('/api/user-monsters', async (req, res) => {
       )
       OUTPUT INSERTED.UserMonsterId
       VALUES (
-        @name, @level, @rarity, @size, @alignment, @family, @sourceBook, @sourcePage, @gameSystem,
+        @name, @level, @rarity, @size, @alignment, @family, @sourceBook, @sourcePage, @aonUrl, @gameSystem,
         @isUnique, @isNpc, @perception, @senses, @languages, @skills, @items,
         @strMod, @dexMod, @conMod, @intMod, @wisMod, @chaMod,
         @ac, @fortitude, @reflex, @will, @hp,
