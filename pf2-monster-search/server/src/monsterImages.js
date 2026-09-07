@@ -65,6 +65,10 @@ function rememberMissingImage(monsterId) {
   missingImageIds.add(monsterId);
 }
 
+export function forgetMissingImage(monsterId) {
+  missingImageIds.delete(monsterId);
+}
+
 const GENERIC_NAME_TOKENS = new Set([
   'aapoph',
   'adult',
@@ -224,6 +228,22 @@ async function resolveRelatedMonsterImageId(pool, monsterId) {
     return null;
   }
   return relatedId;
+}
+
+export async function upsertMonsterImage(pool, monsterId, buffer) {
+  await pool.request()
+    .input('monsterId', sql.Int, monsterId)
+    .input('image', sql.VarBinary(sql.MAX), buffer)
+    .query(`
+      MERGE pf2.MonsterImage AS target
+      USING (SELECT @monsterId AS MonsterID) AS src
+      ON target.MonsterID = src.MonsterID
+      WHEN MATCHED THEN
+        UPDATE SET MonsterImage = @image, MonsterThumbnail = @image
+      WHEN NOT MATCHED THEN
+        INSERT (MonsterID, MonsterImage, MonsterThumbnail)
+        VALUES (@monsterId, @image, @image);
+    `);
 }
 
 export async function fetchMonsterImageFromDb(pool, monsterId) {

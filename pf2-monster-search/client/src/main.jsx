@@ -347,12 +347,20 @@ function useModalEscape({
   isMDPopoutOpen,
   setIsMDPopoutOpen,
   isImagePopoutOpen,
-  setIsImagePopoutOpen
+  setIsImagePopoutOpen,
+  isArtUploadOpen,
+  setIsArtUploadOpen
 }) {
   useEffect(() => {
     function handleKeyDown(event) {
       if (event.key !== 'Escape') return;
       if (isEditableTarget(event.target)) return;
+
+      if (isArtUploadOpen) {
+        event.preventDefault();
+        setIsArtUploadOpen(false);
+        return;
+      }
 
       if (isImagePopoutOpen) {
         event.preventDefault();
@@ -377,7 +385,9 @@ function useModalEscape({
     isMDPopoutOpen,
     setIsMDPopoutOpen,
     isImagePopoutOpen,
-    setIsImagePopoutOpen
+    setIsImagePopoutOpen,
+    isArtUploadOpen,
+    setIsArtUploadOpen
   ]);
 }
 
@@ -508,6 +518,7 @@ const navItems = [
 
 const ArtContext = createContext({
   artEnabled: true,
+  artCanUpload: false,
   showArtUnlock: false,
   unlockArt: async () => false
 });
@@ -559,6 +570,7 @@ function ArtProvider({ children }) {
 
   const value = useMemo(() => ({
     artEnabled: enableArtByEnv === true || unlocked,
+    artCanUpload: enableArtByEnv === false && unlocked,
     showArtUnlock: enableArtByEnv === false,
     unlockArt
   }), [enableArtByEnv, unlocked, unlockArt]);
@@ -1953,6 +1965,33 @@ function getMonsterImageUrl(monster, variant = 'thumb') {
   return variant === 'full' ? `/api/monsters/${monster.MonsterId}/image` : monster.ImageUrl;
 }
 
+function isUserGeneratedMonster(monster) {
+  return monster?.SourceType === 'my monsters' || monster?.ContentType === 'user generated';
+}
+
+function getUserMonsterId(monster) {
+  const id = Number(monster?.UserMonsterId);
+  if (Number.isInteger(id) && id > 0) return id;
+  const monsterId = Number(monster?.MonsterId);
+  if (Number.isInteger(monsterId) && monsterId < 0) return Math.abs(monsterId);
+  return null;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function cacheBustImageUrl(url) {
+  if (!url) return '';
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}t=${Date.now()}`;
+}
+
 function AddUserMonsterModal({ lookups, onClose, onCreated }) {
   const [form, setForm] = useState(emptyUserMonsterForm);
   const [error, setError] = useState('');
@@ -2163,6 +2202,13 @@ function CreatureSearchPage({
     setSelected(monster);
     setSelectedMonster(monster);
   }
+
+  function handleArtUploaded(monster, imageUrl) {
+    const next = { ...monster, ImageUrl: imageUrl };
+    setSelectedMonster(next);
+    setSelected((prev) => (prev?.MonsterId === monster.MonsterId ? next : prev));
+    setRows((prev) => prev.map((row) => (row.MonsterId === monster.MonsterId ? { ...row, ImageUrl: imageUrl } : row)));
+  }
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
@@ -2369,6 +2415,7 @@ function CreatureSearchPage({
       <MonsterModal
         monster={selectedMonster}
         onClose={() => setSelectedMonster(null)}
+        onArtUploaded={handleArtUploaded}
       />
     )}
   </>
@@ -2896,7 +2943,7 @@ function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) 
   );
 }
 
-function ModalArt({ imageUrl, alt, fallbackIcon, onImageOpen }) {
+function ModalArt({ imageUrl, alt, fallbackIcon, onImageOpen, canUpload = false, onEmptyClick }) {
   const { artEnabled } = useArt();
   const [failed, setFailed] = useState(false);
 
@@ -2917,6 +2964,23 @@ function ModalArt({ imageUrl, alt, fallbackIcon, onImageOpen }) {
           onImageOpen();
         }}
       />
+    );
+  }
+
+  if (canUpload && onEmptyClick) {
+    return (
+      <button
+        type="button"
+        className="modal-no-art modal-no-art-upload"
+        title="Click to upload art"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEmptyClick();
+        }}
+      >
+        {fallbackIcon}
+        <span>Upload art</span>
+      </button>
     );
   }
 
@@ -3016,18 +3080,121 @@ function ModalPopouts({
   );
 }
 
-function MonsterModal({ monster, onClose }) {
+function ArtUploadModal({ monsterName, onClose, onUpload }) {
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const fileInputRef = useRef(null);
+  const surfaceRef = useRef(null);
+  const handleFileRef = useRef(null);
+
+  async function handleFile(file) {
+    if (!file || submitting) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Paste or choose a PNG, JPEG, GIF, or WebP image.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setPreviewUrl(dataUrl);
+      await onUpload(dataUrl);
+    } catch (err) {
+      setError(err.message || String(err));
+      setSubmitting(false);
+    }
+  }
+
+  handleFileRef.current = handleFile;
+
+  useEffect(() => {
+    surfaceRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function handlePaste(event) {
+      const items = Array.from(event.clipboardData?.items || []);
+      const imageItem = items.find((item) => item.type.startsWith('image/'));
+      if (!imageItem) return;
+      event.preventDefault();
+      handleFileRef.current?.(imageItem.getAsFile());
+    }
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
+
+  return (
+    <div className="image-popout-backdrop" onClick={onClose}>
+      <div className="art-upload-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="userMonsterModalHeader">
+          <div>
+            <h2>Upload art</h2>
+            <p>{monsterName}</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} disabled={submitting}>×</button>
+        </div>
+
+        <div
+          ref={surfaceRef}
+          className="art-upload-surface"
+          tabIndex={0}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            handleFile(event.dataTransfer.files?.[0]);
+          }}
+        >
+          {previewUrl ? (
+            <img src={previewUrl} alt="Selected art" />
+          ) : (
+            <span>Copy and paste an image here, or drop a file</span>
+          )}
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          hidden
+          onChange={(event) => {
+            handleFile(event.target.files?.[0]);
+            event.target.value = '';
+          }}
+        />
+
+        {error && <p className="error">{error}</p>}
+
+        <div className="actions userMonsterActions">
+          <button type="button" className="primary" disabled={submitting} onClick={() => fileInputRef.current?.click()}>
+            Choose file
+          </button>
+          <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MonsterModal({ monster, onClose, onArtUploaded }) {
   const [isMDPopoutOpen, setIsMDPopoutOpen] = useState(false);
   const [isImagePopoutOpen, setIsImagePopoutOpen] = useState(false);
+  const [isArtUploadOpen, setIsArtUploadOpen] = useState(false);
   const modalRef = useRef(null);
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
-  const { artEnabled } = useArt();
+  const { artEnabled, artCanUpload } = useArt();
   const imageUrl = artEnabled ? getMonsterImageUrl(monster, 'full') : '';
 
   useEffect(() => {
     setIsMDPopoutOpen(false);
     setIsImagePopoutOpen(false);
+    setIsArtUploadOpen(false);
     modalRef.current?.scrollTo(0, 0);
   }, [monster.MonsterId]);
 
@@ -3036,8 +3203,38 @@ function MonsterModal({ monster, onClose }) {
     isMDPopoutOpen,
     setIsMDPopoutOpen,
     isImagePopoutOpen,
-    setIsImagePopoutOpen
+    setIsImagePopoutOpen,
+    isArtUploadOpen,
+    setIsArtUploadOpen
   });
+
+  async function uploadMonsterArt(imageDataUrl) {
+    const isUser = isUserGeneratedMonster(monster);
+    const userMonsterId = isUser ? getUserMonsterId(monster) : null;
+    const url = isUser
+      ? `/api/user-monsters/${userMonsterId}/image`
+      : `/api/monsters/${monster.MonsterId}/image`;
+
+    if (isUser && !userMonsterId) {
+      throw new Error('Could not determine user monster id.');
+    }
+
+    const res = await fetchApi(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl })
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+    const data = await res.json();
+    const nextUrl = cacheBustImageUrl(data.imageUrl || getMonsterImageUrl({
+      ...monster,
+      ImageUrl: isUser
+        ? `/api/user-monsters/${userMonsterId}/image/thumb`
+        : `/api/monsters/${monster.MonsterId}/image/thumb`
+    }, 'thumb'));
+    onArtUploaded?.(monster, nextUrl);
+    setIsArtUploadOpen(false);
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -3051,6 +3248,8 @@ function MonsterModal({ monster, onClose }) {
               alt={monster.Name}
               fallbackIcon={<ImageIcon />}
               onImageOpen={() => setIsImagePopoutOpen(true)}
+              canUpload={artCanUpload}
+              onEmptyClick={() => setIsArtUploadOpen(true)}
             />
 
             <div>
@@ -3115,6 +3314,14 @@ function MonsterModal({ monster, onClose }) {
           isImagePopoutOpen={isImagePopoutOpen}
           onCloseImage={() => setIsImagePopoutOpen(false)}
         />
+
+        {isArtUploadOpen && (
+          <ArtUploadModal
+            monsterName={monster.Name}
+            onClose={() => setIsArtUploadOpen(false)}
+            onUpload={uploadMonsterArt}
+          />
+        )}
       </div>
     </div>
   );

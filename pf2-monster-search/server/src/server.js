@@ -11,8 +11,10 @@ import {
   createMonsterImageCache,
   detectImageContentType,
   fetchMonsterImageFromDb,
+  forgetMissingImage,
   getCachedMonsterThumbnail,
-  sendMonsterImageResponse
+  sendMonsterImageResponse,
+  upsertMonsterImage
 } from './monsterImages.js';
 import { freePort, isPortListening, sleep } from './freePort.mjs';
 
@@ -87,6 +89,10 @@ function isArtEnabled(req) {
   return Boolean(token && artUnlockTokens.has(token));
 }
 
+function isArtUploadAllowed(req) {
+  return !ENABLE_ART && isArtEnabled(req);
+}
+
 function rejectArtIfLocked(req, res) {
   if (isArtEnabled(req)) return false;
   res.setHeader('Cache-Control', 'no-store');
@@ -94,23 +100,14 @@ function rejectArtIfLocked(req, res) {
   return true;
 }
 
-const monsterImageCache = createMonsterImageCache();
-let creatureViewNamePromise;
-
-async function getCreatureViewName(pool) {
-  if (!creatureViewNamePromise) {
-    creatureViewNamePromise = pool.request()
-      .query(`
-        SELECT OBJECT_ID(N'pf2.vwMonsterList', N'V') AS ListViewId
-      `)
-      .then((result) => (
-        result.recordset?.[0]?.ListViewId ? 'pf2.vwMonsterList' : 'pf2.vwMonsterFull'
-      ))
-      .catch(() => 'pf2.vwMonsterFull');
-  }
-
-  return creatureViewNamePromise;
+function rejectArtUploadIfLocked(req, res) {
+  if (isArtUploadAllowed(req)) return false;
+  res.status(403).json({ error: 'Art upload requires password unlock.' });
+  return true;
 }
+
+const monsterImageCache = createMonsterImageCache();
+
 
 const allowedSortColumns = new Set([
   'Name',
@@ -764,7 +761,8 @@ function addFullTextFilter(request, where, debugParams, {
 app.get('/api/config', (req, res) => {
   res.json({
     enableArt: ENABLE_ART,
-    artUnlocked: isArtEnabled(req)
+    artUnlocked: isArtEnabled(req),
+    artUpload: isArtUploadAllowed(req)
   });
 });
 
@@ -1862,49 +1860,6 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     };
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const creatureView = await getCreatureViewName(pool);
-    const creatureColumns = `
-        MonsterId,
-        AonId,
-        AonUrl,
-        Name,
-        Level,
-        RarityId,
-        Rarity,
-        SizeId,
-        Size,
-        AlignmentId,
-        Alignment,
-        FamilyId,
-        Family,
-        SourceBookId,
-        SourceBook,
-        SourcePage,
-        IsUnique,
-        IsNPC,
-        ImageUrl,
-        Perception,
-        Senses,
-        Languages,
-        Skills,
-        Items,
-        StrMod,
-        DexMod,
-        ConMod,
-        IntMod,
-        WisMod,
-        ChaMod,
-        AC,
-        Fortitude,
-        Reflex,
-        Will,
-        HP,
-        Immunities,
-        Resistances,
-        Weaknesses,
-        Speed,
-        RawMD
-    `;
 
     const userMonsterSourceSql = `
       UNION ALL
@@ -1959,20 +1914,71 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     const sourceSystemSql = `
       SELECT
-        ${creatureColumns},
+        m.MonsterId,
+        m.AonId,
+        m.AonUrl,
+        m.Name,
+        m.Level,
+        m.RarityId,
+        r.Name AS Rarity,
+        m.SizeId,
+        sz.Name AS Size,
+        m.AlignmentId,
+        a.Name AS Alignment,
+        m.FamilyId,
+        f.Name AS Family,
+        m.SourceBookId,
+        sb.Name AS SourceBook,
+        m.SourcePage,
+        m.IsUnique,
+        m.IsNPC,
+        m.ImageUrl,
+        ms.Perception,
+        ms.Senses,
+        ms.Languages,
+        ms.Skills,
+        ms.Items,
+        ms.StrMod,
+        ms.DexMod,
+        ms.ConMod,
+        ms.IntMod,
+        ms.WisMod,
+        ms.ChaMod,
+        ms.AC,
+        ms.Fortitude,
+        ms.Reflex,
+        ms.Will,
+        ms.HP,
+        ms.Immunities,
+        ms.Resistances,
+        ms.Weaknesses,
+        ms.Speed,
+        m.RawMD,
         CASE
-          WHEN SourceBook = N'Alien Core'
-            OR SourceBook LIKE N'Alien Core,%'
-            OR SourceBook LIKE N'%, Alien Core'
-            OR SourceBook LIKE N'%, Alien Core,%'
-            OR SourceBook LIKE N'%Starfinder%'
+          WHEN sb.Name = N'Alien Core'
+            OR sb.Name LIKE N'Alien Core,%'
+            OR sb.Name LIKE N'%, Alien Core'
+            OR sb.Name LIKE N'%, Alien Core,%'
+            OR sb.Name LIKE N'%Starfinder%'
           THEN N'SF2'
           ELSE N'PF2'
         END AS GameSystem,
         N'canon' AS ContentType,
         N'canon' AS SourceType,
         CAST(NULL AS int) AS UserMonsterId
-      FROM ${creatureView}
+      FROM pf2.Monster m
+      LEFT JOIN pf2.Rarity r
+        ON m.RarityId = r.RarityId
+      LEFT JOIN pf2.SizeCategory sz
+        ON m.SizeId = sz.SizeId
+      LEFT JOIN pf2.Alignment a
+        ON m.AlignmentId = a.AlignmentId
+      LEFT JOIN pf2.MonsterFamily f
+        ON m.FamilyId = f.FamilyId
+      LEFT JOIN pf2.SourceBook sb
+        ON m.SourceBookId = sb.SourceBookId
+      LEFT JOIN pf2.MonsterStats ms
+        ON m.MonsterId = ms.MonsterId
       ${userMonsterSourceSql}
     `;
 
@@ -2225,6 +2231,51 @@ async function sendUserMonsterImage(req, res, { cacheControl }) {
   }
 }
 
+app.put('/api/user-monsters/:userMonsterId/image', async (req, res) => {
+  if (rejectArtUploadIfLocked(req, res)) return;
+
+  try {
+    const userMonsterId = Number(req.params.userMonsterId);
+    if (!Number.isInteger(userMonsterId) || userMonsterId <= 0) {
+      res.status(400).json({ error: 'Invalid user monster id' });
+      return;
+    }
+
+    const image = parseImagePayload(req.body || {});
+    if (!image.buffer) {
+      res.status(400).json({ error: 'Image is required.' });
+      return;
+    }
+
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('userMonsterId', sql.Int, userMonsterId)
+      .input('image', sql.VarBinary(sql.MAX), image.buffer)
+      .input('imageContentType', sql.NVarChar(100), image.contentType)
+      .query(`
+        UPDATE pf2.UserMonster
+        SET Image = @image,
+            ImageContentType = @imageContentType,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE UserMonsterId = @userMonsterId;
+      `);
+
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      imageUrl: `/api/user-monsters/${userMonsterId}/image/thumb`
+    });
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+});
+
 app.get('/api/user-monsters/:userMonsterId/image/thumb', (req, res) => {
   sendUserMonsterImage(req, res, { cacheControl: 'public, max-age=86400' });
 });
@@ -2242,6 +2293,50 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   routeLabel: 'GET /api/npcs',
   npcMode: 'only'
 }));
+
+app.put('/api/monsters/:monsterId/image', async (req, res) => {
+  if (rejectArtUploadIfLocked(req, res)) return;
+
+  const monsterId = Number(req.params.monsterId);
+  if (!Number.isInteger(monsterId) || monsterId <= 0) {
+    res.status(400).json({ error: 'Invalid monsterId' });
+    return;
+  }
+
+  try {
+    const image = parseImagePayload(req.body || {});
+    if (!image.buffer) {
+      res.status(400).json({ error: 'Image is required.' });
+      return;
+    }
+
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input('monsterId', sql.Int, monsterId)
+      .query(`
+        SELECT MonsterId
+        FROM pf2.Monster
+        WHERE MonsterId = @monsterId
+      `);
+
+    if (!exists.recordset?.[0]) {
+      res.status(404).json({ error: 'Monster not found' });
+      return;
+    }
+
+    await upsertMonsterImage(pool, monsterId, image.buffer);
+    forgetMissingImage(monsterId);
+    monsterImageCache.delete(monsterId);
+
+    res.json({
+      ok: true,
+      imageUrl: `/api/monsters/${monsterId}/image/thumb`
+    });
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+});
 
 app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
   const started = Date.now();

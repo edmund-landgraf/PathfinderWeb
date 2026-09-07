@@ -44,6 +44,13 @@ export class MonsterImageCache {
     return this.entries.has(monsterId);
   }
 
+  delete(monsterId) {
+    const entry = this.entries.get(monsterId);
+    if (!entry) return;
+    this.totalBytes -= entry.byteLength || 0;
+    this.entries.delete(monsterId);
+  }
+
   clear() {
     this.entries.clear();
     this.totalBytes = 0;
