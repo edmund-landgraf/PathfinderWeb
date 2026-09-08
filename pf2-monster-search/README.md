@@ -58,6 +58,14 @@ Open `http://localhost:3333` (or your server IP on that port). The UI, API (`/ap
 
 If `client/dist` is missing, the server runs API-only until you build.
 
+### Update the VPS (`pf2.unwhelm.online`)
+
+Run on the box (`~/node-sites/pf2-search`). Discard generated `updates.json` if git refuses to pull, then install, build, and restart `pf2-api`:
+
+```bash
+cd ~/node-sites/pf2-search && git checkout -- pf2-monster-search/client/public/updates.json 2>/dev/null; git pull && cd pf2-monster-search && npm run install:all && npm run build && pm2 restart pf2-api
+```
+
 ## API
 
 Health:
