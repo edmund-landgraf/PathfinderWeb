@@ -611,6 +611,30 @@ th {
 }
 tr:hover { background: rgba(255,255,255,.07); }
 tr.selected { background: rgba(199,141,76,.17); }
+.rowContextMenu {
+  position: fixed;
+  z-index: 80;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 10px;
+  background: #2a201c;
+  box-shadow: 0 12px 28px rgba(0,0,0,.4);
+}
+.rowContextMenu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: #fff5e8;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.rowContextMenu button:hover {
+  background: rgba(199,141,76,.22);
+}
 tr { cursor: pointer; }
 .artCell { width: 54px; text-align: center; }
 .artCell img, .artFrame {

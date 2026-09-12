@@ -1,8 +1,20 @@
 {
-  "generatedAt": "2026-08-26T20:41:08.440Z",
+  "generatedAt": "2026-08-29T20:34:59.980Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-08-26",
+        "comment": "Add user-created monsters, content-type filters, and AoN source-book sync."
+      },
+      {
+        "date": "2026-08-26",
+        "comment": "Stop filling AonUrl from store links so duplicate source buttons do not appear."
+      },
+      {
+        "date": "2026-08-26",
+        "comment": "Store and display source links for user monsters, including Pathfinder Infinite."
+      },
       {
         "date": "2026-08-18",
         "comment": "Add password-gated art toggle and keep ENABLE_ART out of committed env."

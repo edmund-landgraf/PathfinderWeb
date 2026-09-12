@@ -29,6 +29,69 @@ async function readApiError(res) {
   }
 }
 
+async function copyTextToClipboard(text) {
+  const value = String(text ?? '');
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function RowContextMenu({ x, y, items, onClose }) {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    function onPointerDown(event) {
+      if (!menuRef.current?.contains(event.target)) onClose();
+    }
+
+    function onKeyDown(event) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('scroll', onClose, true);
+    window.addEventListener('resize', onClose);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('scroll', onClose, true);
+      window.removeEventListener('resize', onClose);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="rowContextMenu"
+      style={{ left: x, top: y }}
+      role="menu"
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          role="menuitem"
+          onClick={item.onClick}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const API_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 130000);
 
 async function fetchApi(url, options = {}) {
@@ -2113,9 +2176,12 @@ function CreatureSearchPage({
   const [selected, setSelected] = useState(null);
   const [selectedMonster, setSelectedMonster] = useState(null);
   const [isAddUserMonsterOpen, setIsAddUserMonsterOpen] = useState(false);
+  const [rowMenu, setRowMenu] = useState(null);
   // Grid layout toggle (right/below) — disabled for now
   // const [layout, setLayout] = useState('right');
   const searchRef = useRef(null);
+
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
 
 
   const limit = useMemo(() => Math.min(Math.max(Number(filters.limit || 100), 1), 500), [filters.limit]);
@@ -2193,6 +2259,23 @@ function CreatureSearchPage({
     } else {
       setSortBy(col);
       setSortDir('asc');
+    }
+  }
+
+  function openMonsterRowMenu(event, row) {
+    event.preventDefault();
+    setSelected(row);
+    setRowMenu({ x: event.clientX, y: event.clientY, monsterId: row.MonsterId });
+  }
+
+  async function copyMonsterId() {
+    if (rowMenu?.monsterId == null) return;
+    try {
+      await copyTextToClipboard(rowMenu.monsterId);
+    } catch (err) {
+      setError(err.message || 'Could not copy monster ID.');
+    } finally {
+      closeRowMenu();
     }
   }
 
@@ -2374,6 +2457,7 @@ function CreatureSearchPage({
                     data-row-id={row.MonsterId}
                     onClick={() => setSelected(row)}
                     onDoubleClick={() => setSelectedMonster(row)}
+                    onContextMenu={(event) => openMonsterRowMenu(event, row)}
                     className={selected?.MonsterId === row.MonsterId ? 'selected' : ''}
                     title={detailTitle}
                   >
@@ -2402,6 +2486,15 @@ function CreatureSearchPage({
         </section>
       </main>
     </div>
+
+    {rowMenu && (
+      <RowContextMenu
+        x={rowMenu.x}
+        y={rowMenu.y}
+        onClose={closeRowMenu}
+        items={[{ label: 'get monsterID', onClick: copyMonsterId }]}
+      />
+    )}
 
     {allowUserAdd && isAddUserMonsterOpen && (
       <AddUserMonsterModal

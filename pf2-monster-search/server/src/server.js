@@ -340,6 +340,143 @@ function buildUserMonsterPayload(body) {
     image: parseImagePayload(body)
   };
 }
+
+function parseUserMonsterId(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n === 0) return null;
+  return Math.abs(n);
+}
+
+function bindUserMonsterInputs(request, payload, { includeImage = true } = {}) {
+  request
+    .input('name', sql.NVarChar(255), payload.name)
+    .input('level', sql.Int, payload.level)
+    .input('rarity', sql.NVarChar(100), payload.rarity)
+    .input('size', sql.NVarChar(100), payload.size)
+    .input('alignment', sql.NVarChar(100), payload.alignment)
+    .input('family', sql.NVarChar(255), payload.family)
+    .input('sourceBook', sql.NVarChar(255), payload.sourceBook)
+    .input('sourcePage', sql.NVarChar(50), payload.sourcePage)
+    .input('aonUrl', sql.NVarChar(2048), payload.aonUrl)
+    .input('gameSystem', sql.NVarChar(3), payload.gameSystem)
+    .input('isUnique', sql.Bit, payload.isUnique)
+    .input('isNpc', sql.Bit, payload.isNpc)
+    .input('perception', sql.Int, payload.perception)
+    .input('senses', sql.NVarChar(sql.MAX), payload.senses)
+    .input('languages', sql.NVarChar(sql.MAX), payload.languages)
+    .input('skills', sql.NVarChar(sql.MAX), payload.skills)
+    .input('items', sql.NVarChar(sql.MAX), payload.items)
+    .input('strMod', sql.Int, payload.strMod)
+    .input('dexMod', sql.Int, payload.dexMod)
+    .input('conMod', sql.Int, payload.conMod)
+    .input('intMod', sql.Int, payload.intMod)
+    .input('wisMod', sql.Int, payload.wisMod)
+    .input('chaMod', sql.Int, payload.chaMod)
+    .input('ac', sql.Int, payload.ac)
+    .input('fortitude', sql.Int, payload.fortitude)
+    .input('reflex', sql.Int, payload.reflex)
+    .input('will', sql.Int, payload.will)
+    .input('hp', sql.Int, payload.hp)
+    .input('immunities', sql.NVarChar(sql.MAX), payload.immunities)
+    .input('resistances', sql.NVarChar(sql.MAX), payload.resistances)
+    .input('weaknesses', sql.NVarChar(sql.MAX), payload.weaknesses)
+    .input('speed', sql.NVarChar(sql.MAX), payload.speed)
+    .input('rawMD', sql.NVarChar(sql.MAX), payload.rawMD);
+
+  if (includeImage) {
+    request
+      .input('image', sql.VarBinary(sql.MAX), payload.image.buffer)
+      .input('imageContentType', sql.NVarChar(100), payload.image.contentType);
+  }
+
+  return request;
+}
+
+async function insertUserMonster(pool, payload) {
+  const result = await bindUserMonsterInputs(pool.request(), payload).query(`
+    INSERT INTO pf2.UserMonster (
+      Name, Level, Rarity, Size, Alignment, Family, SourceBook, SourcePage, AonUrl, GameSystem,
+      IsUnique, IsNPC, Perception, Senses, Languages, Skills, Items,
+      StrMod, DexMod, ConMod, IntMod, WisMod, ChaMod,
+      AC, Fortitude, Reflex, Will, HP,
+      Immunities, Resistances, Weaknesses, Speed, RawMD, Image, ImageContentType
+    )
+    OUTPUT INSERTED.UserMonsterId
+    VALUES (
+      @name, @level, @rarity, @size, @alignment, @family, @sourceBook, @sourcePage, @aonUrl, @gameSystem,
+      @isUnique, @isNpc, @perception, @senses, @languages, @skills, @items,
+      @strMod, @dexMod, @conMod, @intMod, @wisMod, @chaMod,
+      @ac, @fortitude, @reflex, @will, @hp,
+      @immunities, @resistances, @weaknesses, @speed, @rawMD, @image, @imageContentType
+    );
+  `);
+  return result.recordset?.[0]?.UserMonsterId;
+}
+
+async function updateUserMonster(pool, userMonsterId, payload) {
+  const includeImage = Boolean(payload.image?.buffer);
+  const request = bindUserMonsterInputs(pool.request(), payload, { includeImage });
+  request.input('userMonsterId', sql.Int, userMonsterId);
+  const imageSql = includeImage
+    ? `,
+        Image = @image,
+        ImageContentType = @imageContentType`
+    : '';
+
+  const result = await request.query(`
+    UPDATE pf2.UserMonster
+    SET
+      Name = @name,
+      Level = @level,
+      Rarity = @rarity,
+      Size = @size,
+      Alignment = @alignment,
+      Family = @family,
+      SourceBook = @sourceBook,
+      SourcePage = @sourcePage,
+      AonUrl = @aonUrl,
+      GameSystem = @gameSystem,
+      IsUnique = @isUnique,
+      IsNPC = @isNpc,
+      Perception = @perception,
+      Senses = @senses,
+      Languages = @languages,
+      Skills = @skills,
+      Items = @items,
+      StrMod = @strMod,
+      DexMod = @dexMod,
+      ConMod = @conMod,
+      IntMod = @intMod,
+      WisMod = @wisMod,
+      ChaMod = @chaMod,
+      AC = @ac,
+      Fortitude = @fortitude,
+      Reflex = @reflex,
+      Will = @will,
+      HP = @hp,
+      Immunities = @immunities,
+      Resistances = @resistances,
+      Weaknesses = @weaknesses,
+      Speed = @speed,
+      RawMD = @rawMD,
+      UpdatedAt = SYSUTCDATETIME()${imageSql}
+    WHERE UserMonsterId = @userMonsterId;
+  `);
+
+  return Boolean(result.rowsAffected?.[0]);
+}
+
+async function userMonsterExists(pool, userMonsterId) {
+  const result = await pool.request()
+    .input('userMonsterId', sql.Int, userMonsterId)
+    .query(`
+      SELECT UserMonsterId
+      FROM pf2.UserMonster
+      WHERE UserMonsterId = @userMonsterId;
+    `);
+  return Boolean(result.recordset?.[0]);
+}
+
 function logSection(title) {
   if (!DEBUG_SQL) return;
   console.log('\n' + '='.repeat(100));
@@ -2116,77 +2253,91 @@ async function fetchUserMonsterById(pool, userMonsterId) {
   return row;
 }
 
-app.post('/api/user-monsters', async (req, res) => {
+async function upsertUserMonster(req, res, { routeLabel, userMonsterIdFromRoute = null } = {}) {
   const started = Date.now();
 
   try {
-    logSection('POST /api/user-monsters');
+    logSection(routeLabel);
 
     const pool = await getPool();
     await ensureUserMonsterSchema(pool);
-    const payload = buildUserMonsterPayload(req.body || {});
+    const body = req.body || {};
+    const payload = buildUserMonsterPayload(body);
+    const requestedId = userMonsterIdFromRoute
+      ?? parseUserMonsterId(body.userMonsterId ?? body.UserMonsterId ?? body.monsterId ?? body.MonsterId);
 
-    const request = pool.request()
-      .input('name', sql.NVarChar(255), payload.name)
-      .input('level', sql.Int, payload.level)
-      .input('rarity', sql.NVarChar(100), payload.rarity)
-      .input('size', sql.NVarChar(100), payload.size)
-      .input('alignment', sql.NVarChar(100), payload.alignment)
-      .input('family', sql.NVarChar(255), payload.family)
-      .input('sourceBook', sql.NVarChar(255), payload.sourceBook)
-      .input('sourcePage', sql.NVarChar(50), payload.sourcePage)
-      .input('aonUrl', sql.NVarChar(2048), payload.aonUrl)
-      .input('gameSystem', sql.NVarChar(3), payload.gameSystem)
-      .input('isUnique', sql.Bit, payload.isUnique)
-      .input('isNpc', sql.Bit, payload.isNpc)
-      .input('perception', sql.Int, payload.perception)
-      .input('senses', sql.NVarChar(sql.MAX), payload.senses)
-      .input('languages', sql.NVarChar(sql.MAX), payload.languages)
-      .input('skills', sql.NVarChar(sql.MAX), payload.skills)
-      .input('items', sql.NVarChar(sql.MAX), payload.items)
-      .input('strMod', sql.Int, payload.strMod)
-      .input('dexMod', sql.Int, payload.dexMod)
-      .input('conMod', sql.Int, payload.conMod)
-      .input('intMod', sql.Int, payload.intMod)
-      .input('wisMod', sql.Int, payload.wisMod)
-      .input('chaMod', sql.Int, payload.chaMod)
-      .input('ac', sql.Int, payload.ac)
-      .input('fortitude', sql.Int, payload.fortitude)
-      .input('reflex', sql.Int, payload.reflex)
-      .input('will', sql.Int, payload.will)
-      .input('hp', sql.Int, payload.hp)
-      .input('immunities', sql.NVarChar(sql.MAX), payload.immunities)
-      .input('resistances', sql.NVarChar(sql.MAX), payload.resistances)
-      .input('weaknesses', sql.NVarChar(sql.MAX), payload.weaknesses)
-      .input('speed', sql.NVarChar(sql.MAX), payload.speed)
-      .input('rawMD', sql.NVarChar(sql.MAX), payload.rawMD)
-      .input('image', sql.VarBinary(sql.MAX), payload.image.buffer)
-      .input('imageContentType', sql.NVarChar(100), payload.image.contentType);
+    let userMonsterId = requestedId;
+    let created = false;
 
-    const result = await request.query(`
-      INSERT INTO pf2.UserMonster (
-        Name, Level, Rarity, Size, Alignment, Family, SourceBook, SourcePage, AonUrl, GameSystem,
-        IsUnique, IsNPC, Perception, Senses, Languages, Skills, Items,
-        StrMod, DexMod, ConMod, IntMod, WisMod, ChaMod,
-        AC, Fortitude, Reflex, Will, HP,
-        Immunities, Resistances, Weaknesses, Speed, RawMD, Image, ImageContentType
-      )
-      OUTPUT INSERTED.UserMonsterId
-      VALUES (
-        @name, @level, @rarity, @size, @alignment, @family, @sourceBook, @sourcePage, @aonUrl, @gameSystem,
-        @isUnique, @isNpc, @perception, @senses, @languages, @skills, @items,
-        @strMod, @dexMod, @conMod, @intMod, @wisMod, @chaMod,
-        @ac, @fortitude, @reflex, @will, @hp,
-        @immunities, @resistances, @weaknesses, @speed, @rawMD, @image, @imageContentType
-      );
-    `);
+    if (requestedId && await userMonsterExists(pool, requestedId)) {
+      await updateUserMonster(pool, requestedId, payload);
+    } else {
+      userMonsterId = await insertUserMonster(pool, payload);
+      created = true;
+    }
 
-    const userMonsterId = result.recordset?.[0]?.UserMonsterId;
     const row = await fetchUserMonsterById(pool, userMonsterId);
-
-    logValue('Created user monster:', userMonsterId);
+    logValue(created ? 'Created user monster:' : 'Updated user monster:', userMonsterId);
     logValue('Elapsed ms:', Date.now() - started);
-    res.status(201).json(row);
+    res.status(created ? 201 : 200).json(row);
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+}
+
+app.post('/api/user-monsters', (req, res) => upsertUserMonster(req, res, {
+  routeLabel: 'POST /api/user-monsters'
+}));
+
+app.put('/api/user-monsters', (req, res) => upsertUserMonster(req, res, {
+  routeLabel: 'PUT /api/user-monsters'
+}));
+
+app.put('/api/user-monsters/:userMonsterId', (req, res, next) => {
+  if (String(req.params.userMonsterId).toLowerCase() === 'image') return next();
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+  if (!userMonsterId) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  return upsertUserMonster(req, res, {
+    routeLabel: 'PUT /api/user-monsters/:userMonsterId',
+    userMonsterIdFromRoute: userMonsterId
+  });
+});
+
+app.delete('/api/user-monsters/:userMonsterId', async (req, res) => {
+  const started = Date.now();
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+
+  try {
+    logSection('DELETE /api/user-monsters/:userMonsterId');
+    logValue('userMonsterId:', req.params.userMonsterId);
+
+    if (!userMonsterId) {
+      res.status(400).json({ error: 'Invalid userMonsterId' });
+      return;
+    }
+
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('userMonsterId', sql.Int, userMonsterId)
+      .query(`
+        DELETE FROM pf2.UserMonster
+        WHERE UserMonsterId = @userMonsterId;
+      `);
+
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+
+    logValue('Deleted user monster:', userMonsterId);
+    logValue('Elapsed ms:', Date.now() - started);
+    res.status(204).send();
   } catch (err) {
     logError(err);
     res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
