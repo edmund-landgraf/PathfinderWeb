@@ -1,8 +1,24 @@
 {
-  "generatedAt": "2026-08-29T20:34:59.980Z",
+  "generatedAt": "2026-09-16T16:44:49.144Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-09-13",
+        "comment": "Add a Demiplane RawMD repair script that copies imported RawHtml into empty RawMD using SQL login for Docker SQL Server."
+      },
+      {
+        "date": "2026-09-11",
+        "comment": "Add user-monster update/delete APIs and a copy-ID row context menu."
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Allow password-unlocked users to upload monster art and query creatures from base tables."
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Document the VPS pull-build-restart steps for pf2.unwhelm.online."
+      },
       {
         "date": "2026-08-26",
         "comment": "Add user-created monsters, content-type filters, and AoN source-book sync."
@@ -128,6 +144,26 @@
   "utilities": {
     "title": "Pathfinder Utilities",
     "entries": [
+      {
+        "date": "2026-09-07",
+        "comment": "Add monster thumbnail generator for pf2.MonsterImage."
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Date windows now match when Archives of Nethys posted a book, so late-added adventure paths are picked up without widening publication-date ranges."
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Fill missing MonsterThumbnail WebP previews from stored art using the same localhost SQL connection as the other importers."
+      },
+      {
+        "date": "2026-09-07",
+        "comment": "Filter AoN source imports by homepage listed date and include Adventures."
+      },
       {
         "date": "2026-08-17",
         "comment": "Add Demiplane missing creature importer"

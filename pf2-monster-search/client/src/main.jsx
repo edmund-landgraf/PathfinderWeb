@@ -583,7 +583,9 @@ const ArtContext = createContext({
   artEnabled: true,
   artCanUpload: false,
   showArtUnlock: false,
-  unlockArt: async () => false
+  adminEnabled: false,
+  unlockArt: async () => false,
+  unlockAdmin: async () => false
 });
 
 function useArt() {
@@ -593,6 +595,7 @@ function useArt() {
 function ArtProvider({ children }) {
   const [enableArtByEnv, setEnableArtByEnv] = useState(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -606,6 +609,7 @@ function ArtProvider({ children }) {
         if (cancelled) return;
         setEnableArtByEnv(Boolean(data.enableArt));
         setUnlocked(Boolean(data.artUnlocked));
+        setAdminUnlocked(Boolean(data.adminUnlocked));
       })
       .catch(() => {
         if (!cancelled) setEnableArtByEnv(true);
@@ -631,20 +635,37 @@ function ArtProvider({ children }) {
     return true;
   }, []);
 
+  const unlockAdmin = useCallback(async (password) => {
+    const res = await fetchApi('/api/admin/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+
+    if (!res.ok) {
+      throw new Error(await readApiError(res));
+    }
+
+    window.location.reload();
+    return true;
+  }, []);
+
   const value = useMemo(() => ({
     artEnabled: enableArtByEnv === true || unlocked,
     artCanUpload: enableArtByEnv === false && unlocked,
     showArtUnlock: enableArtByEnv === false,
-    unlockArt
-  }), [enableArtByEnv, unlocked, unlockArt]);
+    adminEnabled: adminUnlocked,
+    unlockArt,
+    unlockAdmin
+  }), [enableArtByEnv, unlocked, adminUnlocked, unlockArt, unlockAdmin]);
 
   return <ArtContext.Provider value={value}>{children}</ArtContext.Provider>;
 }
 
 function SettingsMenu() {
-  const { showArtUnlock, artEnabled, unlockArt } = useArt();
+  const { showArtUnlock, artEnabled, unlockArt, adminEnabled, unlockAdmin } = useArt();
   const [open, setOpen] = useState(false);
-  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordTarget, setPasswordTarget] = useState(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -659,7 +680,20 @@ function SettingsMenu() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  if (!showArtUnlock) return null;
+  if (!showArtUnlock && adminEnabled) return null;
+
+  function openPassword(target) {
+    setOpen(false);
+    setPasswordTarget(target);
+    setPassword('');
+    setError('');
+  }
+
+  function closePassword() {
+    setPasswordTarget(null);
+    setPassword('');
+    setError('');
+  }
 
   async function submitPassword(event) {
     event.preventDefault();
@@ -667,9 +701,12 @@ function SettingsMenu() {
     setError('');
 
     try {
-      await unlockArt(password);
-      setPassword('');
-      setPasswordOpen(false);
+      if (passwordTarget === 'admin') {
+        await unlockAdmin(password);
+      } else {
+        await unlockArt(password);
+      }
+      closePassword();
       setOpen(false);
     } catch (err) {
       setError(err.message || 'Invalid password');
@@ -677,6 +714,11 @@ function SettingsMenu() {
       setSubmitting(false);
     }
   }
+
+  const passwordTitle = passwordTarget === 'admin' ? 'Enable Admin' : 'Enable Art';
+  const passwordDescription = passwordTarget === 'admin'
+    ? 'Enter the admin password to enable protected actions.'
+    : 'Enter the password to show preview and modal art.';
 
   return (
     <div className="settingsMenu" ref={menuRef}>
@@ -692,26 +734,32 @@ function SettingsMenu() {
 
       {open && (
         <div className="settingsDropdown" role="menu">
+          {showArtUnlock && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={artEnabled}
+              onClick={() => openPassword('art')}
+            >
+              {artEnabled ? 'Art enabled' : 'Enable Art (requires password)'}
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
-            disabled={artEnabled}
-            onClick={() => {
-              setOpen(false);
-              setPasswordOpen(true);
-              setError('');
-            }}
+            disabled={adminEnabled}
+            onClick={() => openPassword('admin')}
           >
-            {artEnabled ? 'Art enabled' : 'Enable Art (requires password)'}
+            {adminEnabled ? 'Admin enabled' : 'Enable Admin (requires password)'}
           </button>
         </div>
       )}
 
-      {passwordOpen && (
-        <div className="modal-backdrop settingsPasswordBackdrop" onClick={() => setPasswordOpen(false)}>
+      {passwordTarget && (
+        <div className="modal-backdrop settingsPasswordBackdrop" onClick={closePassword}>
           <form className="settingsPasswordModal" onClick={(e) => e.stopPropagation()} onSubmit={submitPassword}>
-            <h2>Enable Art</h2>
-            <p>Enter the password to show preview and modal art.</p>
+            <h2>{passwordTitle}</h2>
+            <p>{passwordDescription}</p>
             <input
               type="password"
               autoFocus
@@ -722,7 +770,7 @@ function SettingsMenu() {
             {error && <p className="error">{error}</p>}
             <div className="actions">
               <button type="submit" className="primary" disabled={submitting || !password}>Enable</button>
-              <button type="button" onClick={() => setPasswordOpen(false)}>Cancel</button>
+              <button type="button" onClick={closePassword}>Cancel</button>
             </div>
           </form>
         </div>
@@ -752,8 +800,20 @@ function NavBar({ currentPage, onNavigate, className = '' }) {
   );
 }
 
+function getMonsterPermalinkId() {
+  const match = window.location.pathname.match(/^\/monsters\/(-?\d+)$/i);
+  if (!match) return null;
+  const monsterId = Number(match[1]);
+  return Number.isInteger(monsterId) && monsterId !== 0 ? monsterId : null;
+}
+
+function monsterPermalink(monsterId, origin = window.location.origin) {
+  return `${origin}/monsters/${monsterId}`;
+}
+
 function getCurrentPage() {
   const path = window.location.pathname.toLowerCase();
+  if (getMonsterPermalinkId() != null) return 'monster';
   if (path === '/equipment') return 'equipment';
   if (path === '/feats') return 'feats';
   if (path === '/spells') return 'spells';
@@ -787,6 +847,10 @@ function AppRoutes() {
   function navigate(path) {
     window.history.pushState(null, '', path);
     setPage(getCurrentPage());
+  }
+
+  if (page === 'monster') {
+    return <MonsterDirectPage monsterId={getMonsterPermalinkId()} onNavigate={navigate} />;
   }
 
   if (page === 'monsters') {
@@ -2164,6 +2228,7 @@ function CreatureSearchPage({
   detailTitle = 'Double-click to open full details',
   allowUserAdd = false
 }) {
+  const { adminEnabled } = useArt();
   const [filters, setFilters] = useState(emptyFilters);
   const [lookups, setLookups] = useState({ rarity: [], size: [], alignment: [], family: [], sourceBook: [] });
   const [rows, setRows] = useState([]);
@@ -2265,7 +2330,13 @@ function CreatureSearchPage({
   function openMonsterRowMenu(event, row) {
     event.preventDefault();
     setSelected(row);
-    setRowMenu({ x: event.clientX, y: event.clientY, monsterId: row.MonsterId });
+    setRowMenu({
+      x: event.clientX,
+      y: event.clientY,
+      monsterId: row.MonsterId,
+      userMonsterId: row.UserMonsterId,
+      name: row.Name
+    });
   }
 
   async function copyMonsterId() {
@@ -2279,6 +2350,44 @@ function CreatureSearchPage({
     }
   }
 
+  async function copyMonsterLink() {
+    if (rowMenu?.monsterId == null) return;
+    const url = monsterPermalink(rowMenu.monsterId);
+    try {
+      await copyTextToClipboard(url);
+      window.open(url, `monster-${rowMenu.monsterId}`, 'popup=yes,width=1200,height=900');
+    } catch (err) {
+      setError(err.message || 'Could not copy monster link.');
+    } finally {
+      closeRowMenu();
+    }
+  }
+
+  async function deleteUserMonster() {
+    const userMonsterId = rowMenu?.userMonsterId;
+    const monsterId = rowMenu?.monsterId;
+    if (!userMonsterId) return;
+
+    const ok = window.confirm(`Delete ${rowMenu.name || 'this custom monster'}?`);
+    if (!ok) {
+      closeRowMenu();
+      return;
+    }
+
+    try {
+      const res = await fetchApi(`/api/user-monsters/${userMonsterId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await readApiError(res));
+
+      setRows((prev) => prev.filter((row) => row.UserMonsterId !== userMonsterId));
+      setTotal((prev) => Math.max(0, prev - 1));
+      setSelected((prev) => (prev?.MonsterId === monsterId ? null : prev));
+      setSelectedMonster((prev) => (prev?.MonsterId === monsterId ? null : prev));
+    } catch (err) {
+      setError(err.message || 'Could not delete custom monster.');
+    } finally {
+      closeRowMenu();
+    }
+  }
   function handleUserMonsterCreated(monster) {
     setIsAddUserMonsterOpen(false);
     search(0);
@@ -2492,7 +2601,13 @@ function CreatureSearchPage({
         x={rowMenu.x}
         y={rowMenu.y}
         onClose={closeRowMenu}
-        items={[{ label: 'get monsterID', onClick: copyMonsterId }]}
+        items={[
+          { label: 'Get Link', onClick: copyMonsterLink },
+          { label: 'get monsterID', onClick: copyMonsterId },
+          ...(adminEnabled && rowMenu.userMonsterId ? [
+            { label: 'delete', onClick: deleteUserMonster }
+          ] : [])
+        ]}
       />
     )}
 
@@ -2512,6 +2627,71 @@ function CreatureSearchPage({
       />
     )}
   </>
+  );
+}
+
+function MonsterDirectPage({ monsterId, onNavigate }) {
+  const [monster, setMonster] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetchApi(`/api/monsters/${monsterId}`);
+        if (res.status === 404) throw new Error('Monster not found');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const data = await res.json();
+        if (!cancelled) setMonster(data);
+      } catch (err) {
+        if (!cancelled) {
+          setMonster(null);
+          setError(err.message || String(err));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [monsterId]);
+
+  function handleClose() {
+    if (window.opener && !window.opener.closed) {
+      window.close();
+      return;
+    }
+    onNavigate('/monsters');
+  }
+
+  return (
+    <div className="app monsterDirectPage">
+      <header className="topbar">
+        <div>
+          <h1>{monster?.Name || 'Monster'}</h1>
+          <p>Direct monster view — not tied to search.</p>
+        </div>
+        <NavBar currentPage="monster" onNavigate={onNavigate} />
+      </header>
+
+      {loading && <p className="monsterDirectStatus">Loading...</p>}
+      {error && <p className="monsterDirectStatus error">{error}</p>}
+
+      {monster && (
+        <MonsterModal
+          monster={monster}
+          onClose={handleClose}
+          onArtUploaded={(_, imageUrl) => setMonster((prev) => (prev ? { ...prev, ImageUrl: imageUrl } : prev))}
+        />
+      )}
+    </div>
   );
 }
 
@@ -2821,7 +3001,8 @@ function isSupportedMarkdownHref(href) {
       return url.protocol === 'http:' || url.protocol === 'https:';
     }
 
-    return localMarkdownRoutes.has(url.pathname.toLowerCase());
+    return localMarkdownRoutes.has(url.pathname.toLowerCase())
+      || /^\/monsters\/-?\d+$/i.test(url.pathname);
   } catch {
     return false;
   }

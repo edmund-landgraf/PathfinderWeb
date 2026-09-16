@@ -676,6 +676,16 @@ tr { cursor: pointer; }
 .detailBlock b { color: #f5d2aa; }
 .detailBlock p { color: #eaddcf; margin: 3px 0 0; line-height: 1.35; }
 
+.monsterDirectPage .topbar {
+  position: relative;
+  z-index: 1;
+}
+
+.monsterDirectStatus {
+  padding: 24px;
+  color: #eaddcf;
+}
+
 /* Double-click monster modal */
 .modal-backdrop {
   position: fixed;

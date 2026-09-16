@@ -36,8 +36,11 @@ const DEBUG_SQL =
 const ENABLE_ART =
   String(process.env.ENABLE_ART || 'true').toLowerCase() === 'true';
 const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
+const ADMIN_PWD = String(process.env.ADMIN_PWD || 'AmbaAdminOK');
 const ART_COOKIE = 'pf2_art';
+const ADMIN_COOKIE = 'pf2_admin';
 const artUnlockTokens = new Set();
+const adminUnlockTokens = new Set();
 
 function artCookieOptions(req) {
   const origin = String(req.headers.origin || '');
@@ -93,6 +96,11 @@ function isArtUploadAllowed(req) {
   return !ENABLE_ART && isArtEnabled(req);
 }
 
+function isAdminEnabled(req) {
+  const token = parseCookies(req)[ADMIN_COOKIE];
+  return Boolean(token && adminUnlockTokens.has(token));
+}
+
 function rejectArtIfLocked(req, res) {
   if (isArtEnabled(req)) return false;
   res.setHeader('Cache-Control', 'no-store');
@@ -103,6 +111,12 @@ function rejectArtIfLocked(req, res) {
 function rejectArtUploadIfLocked(req, res) {
   if (isArtUploadAllowed(req)) return false;
   res.status(403).json({ error: 'Art upload requires password unlock.' });
+  return true;
+}
+
+function rejectAdminIfLocked(req, res) {
+  if (isAdminEnabled(req)) return false;
+  res.status(403).json({ error: 'Admin password unlock required.' });
   return true;
 }
 
@@ -899,7 +913,8 @@ app.get('/api/config', (req, res) => {
   res.json({
     enableArt: ENABLE_ART,
     artUnlocked: isArtEnabled(req),
-    artUpload: isArtUploadAllowed(req)
+    artUpload: isArtUploadAllowed(req),
+    adminUnlocked: isAdminEnabled(req)
   });
 });
 
@@ -918,6 +933,18 @@ app.post('/api/art/unlock', (req, res) => {
   artUnlockTokens.add(token);
   res.cookie(ART_COOKIE, token, artCookieOptions(req));
   res.json({ ok: true, enableArt: false, artUnlocked: true });
+});
+
+app.post('/api/admin/unlock', (req, res) => {
+  if (!passwordsMatch(req.body?.password, ADMIN_PWD)) {
+    res.status(401).json({ error: 'Invalid password' });
+    return;
+  }
+
+  const token = randomBytes(32).toString('hex');
+  adminUnlockTokens.add(token);
+  res.cookie(ADMIN_COOKIE, token, artCookieOptions(req));
+  res.json({ ok: true, adminUnlocked: true });
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -1862,6 +1889,145 @@ app.get('/api/spells', async (req, res) => {
   }
 });
 
+function buildCreatureSourceSql() {
+  return `
+      SELECT
+        m.MonsterId,
+        m.AonId,
+        m.AonUrl,
+        m.Name,
+        m.Level,
+        m.RarityId,
+        r.Name AS Rarity,
+        m.SizeId,
+        sz.Name AS Size,
+        m.AlignmentId,
+        a.Name AS Alignment,
+        m.FamilyId,
+        f.Name AS Family,
+        m.SourceBookId,
+        sb.Name AS SourceBook,
+        m.SourcePage,
+        m.IsUnique,
+        m.IsNPC,
+        m.ImageUrl,
+        ms.Perception,
+        ms.Senses,
+        ms.Languages,
+        ms.Skills,
+        ms.Items,
+        ms.StrMod,
+        ms.DexMod,
+        ms.ConMod,
+        ms.IntMod,
+        ms.WisMod,
+        ms.ChaMod,
+        ms.AC,
+        ms.Fortitude,
+        ms.Reflex,
+        ms.Will,
+        ms.HP,
+        ms.Immunities,
+        ms.Resistances,
+        ms.Weaknesses,
+        ms.Speed,
+        m.RawMD,
+        CASE
+          WHEN sb.Name = N'Alien Core'
+            OR sb.Name LIKE N'Alien Core,%'
+            OR sb.Name LIKE N'%, Alien Core'
+            OR sb.Name LIKE N'%, Alien Core,%'
+            OR sb.Name LIKE N'%Starfinder%'
+          THEN N'SF2'
+          ELSE N'PF2'
+        END AS GameSystem,
+        N'canon' AS ContentType,
+        N'canon' AS SourceType,
+        CAST(NULL AS int) AS UserMonsterId
+      FROM pf2.Monster m
+      LEFT JOIN pf2.Rarity r
+        ON m.RarityId = r.RarityId
+      LEFT JOIN pf2.SizeCategory sz
+        ON m.SizeId = sz.SizeId
+      LEFT JOIN pf2.Alignment a
+        ON m.AlignmentId = a.AlignmentId
+      LEFT JOIN pf2.MonsterFamily f
+        ON m.FamilyId = f.FamilyId
+      LEFT JOIN pf2.SourceBook sb
+        ON m.SourceBookId = sb.SourceBookId
+      LEFT JOIN pf2.MonsterStats ms
+        ON m.MonsterId = ms.MonsterId
+
+      UNION ALL
+
+      SELECT
+        -um.UserMonsterId AS MonsterId,
+        CAST(NULL AS int) AS AonId,
+        um.AonUrl,
+        um.Name,
+        um.Level,
+        CAST(NULL AS int) AS RarityId,
+        um.Rarity,
+        CAST(NULL AS int) AS SizeId,
+        um.Size,
+        CAST(NULL AS int) AS AlignmentId,
+        um.Alignment,
+        CAST(NULL AS int) AS FamilyId,
+        um.Family,
+        CAST(NULL AS int) AS SourceBookId,
+        um.SourceBook,
+        um.SourcePage,
+        um.IsUnique,
+        um.IsNPC,
+        CASE WHEN um.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', um.UserMonsterId, N'/image/thumb') END AS ImageUrl,
+        um.Perception,
+        um.Senses,
+        um.Languages,
+        um.Skills,
+        um.Items,
+        um.StrMod,
+        um.DexMod,
+        um.ConMod,
+        um.IntMod,
+        um.WisMod,
+        um.ChaMod,
+        um.AC,
+        um.Fortitude,
+        um.Reflex,
+        um.Will,
+        um.HP,
+        um.Immunities,
+        um.Resistances,
+        um.Weaknesses,
+        um.Speed,
+        um.RawMD,
+        um.GameSystem,
+        um.ContentType,
+        N'my monsters' AS SourceType,
+        um.UserMonsterId
+      FROM pf2.UserMonster um
+  `;
+}
+
+async function fetchCreatureByMonsterId(pool, monsterId) {
+  await ensureUserMonsterSchema(pool);
+  const result = await pool.request()
+    .input('monsterId', sql.Int, monsterId)
+    .query(`
+      SELECT TOP 1 *
+      FROM (
+        ${buildCreatureSourceSql()}
+      ) creatures
+      WHERE MonsterId = @monsterId;
+    `);
+
+  const row = result.recordset?.[0] || null;
+  if (row) {
+    await attachSourcePurchaseUrls(pool, [row]);
+  }
+  return row;
+}
+
 async function queryCreatures(req, res, { routeLabel, npcMode }) {
   const started = Date.now();
 
@@ -1997,127 +2163,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     };
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-    const userMonsterSourceSql = `
-      UNION ALL
-
-      SELECT
-        -um.UserMonsterId AS MonsterId,
-        CAST(NULL AS int) AS AonId,
-        um.AonUrl,
-        um.Name,
-        um.Level,
-        CAST(NULL AS int) AS RarityId,
-        um.Rarity,
-        CAST(NULL AS int) AS SizeId,
-        um.Size,
-        CAST(NULL AS int) AS AlignmentId,
-        um.Alignment,
-        CAST(NULL AS int) AS FamilyId,
-        um.Family,
-        CAST(NULL AS int) AS SourceBookId,
-        um.SourceBook,
-        um.SourcePage,
-        um.IsUnique,
-        um.IsNPC,
-        CASE WHEN um.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', um.UserMonsterId, N'/image/thumb') END AS ImageUrl,
-        um.Perception,
-        um.Senses,
-        um.Languages,
-        um.Skills,
-        um.Items,
-        um.StrMod,
-        um.DexMod,
-        um.ConMod,
-        um.IntMod,
-        um.WisMod,
-        um.ChaMod,
-        um.AC,
-        um.Fortitude,
-        um.Reflex,
-        um.Will,
-        um.HP,
-        um.Immunities,
-        um.Resistances,
-        um.Weaknesses,
-        um.Speed,
-        um.RawMD,
-        um.GameSystem,
-        um.ContentType,
-        N'my monsters' AS SourceType,
-        um.UserMonsterId
-      FROM pf2.UserMonster um
-    `;
-
-    const sourceSystemSql = `
-      SELECT
-        m.MonsterId,
-        m.AonId,
-        m.AonUrl,
-        m.Name,
-        m.Level,
-        m.RarityId,
-        r.Name AS Rarity,
-        m.SizeId,
-        sz.Name AS Size,
-        m.AlignmentId,
-        a.Name AS Alignment,
-        m.FamilyId,
-        f.Name AS Family,
-        m.SourceBookId,
-        sb.Name AS SourceBook,
-        m.SourcePage,
-        m.IsUnique,
-        m.IsNPC,
-        m.ImageUrl,
-        ms.Perception,
-        ms.Senses,
-        ms.Languages,
-        ms.Skills,
-        ms.Items,
-        ms.StrMod,
-        ms.DexMod,
-        ms.ConMod,
-        ms.IntMod,
-        ms.WisMod,
-        ms.ChaMod,
-        ms.AC,
-        ms.Fortitude,
-        ms.Reflex,
-        ms.Will,
-        ms.HP,
-        ms.Immunities,
-        ms.Resistances,
-        ms.Weaknesses,
-        ms.Speed,
-        m.RawMD,
-        CASE
-          WHEN sb.Name = N'Alien Core'
-            OR sb.Name LIKE N'Alien Core,%'
-            OR sb.Name LIKE N'%, Alien Core'
-            OR sb.Name LIKE N'%, Alien Core,%'
-            OR sb.Name LIKE N'%Starfinder%'
-          THEN N'SF2'
-          ELSE N'PF2'
-        END AS GameSystem,
-        N'canon' AS ContentType,
-        N'canon' AS SourceType,
-        CAST(NULL AS int) AS UserMonsterId
-      FROM pf2.Monster m
-      LEFT JOIN pf2.Rarity r
-        ON m.RarityId = r.RarityId
-      LEFT JOIN pf2.SizeCategory sz
-        ON m.SizeId = sz.SizeId
-      LEFT JOIN pf2.Alignment a
-        ON m.AlignmentId = a.AlignmentId
-      LEFT JOIN pf2.MonsterFamily f
-        ON m.FamilyId = f.FamilyId
-      LEFT JOIN pf2.SourceBook sb
-        ON m.SourceBookId = sb.SourceBookId
-      LEFT JOIN pf2.MonsterStats ms
-        ON m.MonsterId = ms.MonsterId
-      ${userMonsterSourceSql}
-    `;
+    const sourceSystemSql = buildCreatureSourceSql();
 
     const query = `
       SELECT *
@@ -2309,6 +2355,8 @@ app.put('/api/user-monsters/:userMonsterId', (req, res, next) => {
 });
 
 app.delete('/api/user-monsters/:userMonsterId', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
   const started = Date.now();
   const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
 
@@ -2444,6 +2492,38 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   routeLabel: 'GET /api/npcs',
   npcMode: 'only'
 }));
+
+app.get('/api/monsters/:monsterId', async (req, res) => {
+  const started = Date.now();
+  const monsterId = Number(req.params.monsterId);
+
+  try {
+    logSection('GET /api/monsters/:monsterId');
+    logValue('monsterId:', req.params.monsterId);
+
+    if (!Number.isInteger(monsterId) || monsterId === 0) {
+      res.status(400).json({ error: 'Invalid monsterId' });
+      return;
+    }
+
+    const pool = await getPool();
+    const row = await fetchCreatureByMonsterId(pool, monsterId);
+    if (!row) {
+      res.status(404).json({ error: 'Monster not found' });
+      return;
+    }
+
+    if (isArtEnabled(req)) {
+      await attachMonsterImageUrls(pool, [row]);
+    }
+
+    logValue('Elapsed ms:', Date.now() - started);
+    res.json(row);
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
 
 app.put('/api/monsters/:monsterId/image', async (req, res) => {
   if (rejectArtUploadIfLocked(req, res)) return;

@@ -95,6 +95,15 @@ test('custom monster upsert and delete round trip', async (t) => {
   assert.ok(match, 'updated custom monster should appear in monster search');
   assert.equal(match.Name, updatedName);
 
+  const byId = await requestJson('GET', `/api/monsters/${-userMonsterId}`);
+  assert.equal(byId.response.status, 200);
+  assert.equal(byId.json.UserMonsterId, userMonsterId);
+  assert.equal(byId.json.Name, updatedName);
+  assert.equal(byId.json.MonsterId, -userMonsterId);
+
+  const missing = await requestJson('GET', '/api/monsters/-99999999');
+  assert.equal(missing.response.status, 404);
+
   const deleted = await requestJson('DELETE', `/api/user-monsters/${userMonsterId}`, {
     expectJson: false
   });
