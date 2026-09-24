@@ -1414,6 +1414,34 @@ tr { cursor: pointer; }
 .userMonsterActions {
   justify-content: flex-end;
 }
+.rowActionMenu {
+  position: fixed;
+  z-index: 40;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px;
+  background: #2a211c;
+  box-shadow: 0 12px 28px rgba(0,0,0,.4);
+}
+.rowActionMenu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 10px;
+  text-align: left;
+  color: #f4efe8;
+  background: transparent;
+  cursor: pointer;
+}
+.rowActionMenu button:hover:not(:disabled) {
+  background: rgba(255,255,255,.08);
+}
+.rowActionMenu button:disabled {
+  opacity: .45;
+  cursor: default;
+}
 @media (max-width: 1000px) {
   .app:has(main.split) { height: auto; overflow: visible; }
   .split { flex: none; min-height: auto; overflow: visible; }

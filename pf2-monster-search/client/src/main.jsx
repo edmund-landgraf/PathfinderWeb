@@ -15,6 +15,98 @@ import { imageLibraryEntries } from './imagesLibrary.js';
 import './styles.css';
 
 
+async function copyText(value) {
+  const text = String(value ?? '');
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.left = '-9999px';
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand('copy');
+  area.remove();
+}
+
+function useRowActionMenu() {
+  const [menu, setMenu] = useState(null);
+
+  useEffect(() => {
+    if (!menu) return undefined;
+
+    function close() {
+      setMenu(null);
+    }
+
+    function handleKey(event) {
+      if (event.key === 'Escape') close();
+    }
+
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [menu]);
+
+  function openRowMenu(event, { id, link, idLabel }) {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      id,
+      link: link || '',
+      idLabel
+    });
+  }
+
+  return { menu, openRowMenu, closeRowMenu: () => setMenu(null) };
+}
+
+function RowActionMenu({ menu, onClose }) {
+  if (!menu) return null;
+
+  return (
+    <div
+      className="rowActionMenu"
+      style={{ left: menu.x, top: menu.y }}
+      role="menu"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        disabled={!menu.link}
+        onClick={() => {
+          void copyText(menu.link);
+          onClose();
+        }}
+      >
+        Get Link
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          void copyText(menu.id);
+          onClose();
+        }}
+      >
+        {menu.idLabel}
+      </button>
+    </div>
+  );
+}
+
 async function readApiError(res) {
   const text = await res.text();
   if (!text) return `Request failed (${res.status})`;
@@ -1294,6 +1386,7 @@ function SpellsPage({ onNavigate }) {
   const [selected, setSelected] = useState(null);
   const [selectedSpell, setSelectedSpell] = useState(null);
   const searchRef = useRef(null);
+  const { menu, openRowMenu, closeRowMenu } = useRowActionMenu();
 
   const limit = useMemo(() => Math.min(Math.max(Number(filters.limit || 100), 1), 500), [filters.limit]);
 
@@ -1502,6 +1595,10 @@ function SpellsPage({ onNavigate }) {
                     data-row-id={row.SpellId}
                     onClick={() => setSelected(row)}
                     onDoubleClick={() => setSelectedSpell(row)}
+                    onContextMenu={(event) => {
+                      setSelected(row);
+                      openRowMenu(event, { id: row.SpellId, link: row.AonUrl, idLabel: 'get SpellID' });
+                    }}
                     className={selected?.SpellId === row.SpellId ? 'selected' : ''}
                     title="Double-click to open full spell details"
                   >
@@ -1533,6 +1630,7 @@ function SpellsPage({ onNavigate }) {
         onClose={() => setSelectedSpell(null)}
       />
     )}
+    <RowActionMenu menu={menu} onClose={closeRowMenu} />
   </>
   );
 }
@@ -1550,6 +1648,7 @@ function FeatsPage({ onNavigate }) {
   const [selected, setSelected] = useState(null);
   const [selectedFeat, setSelectedFeat] = useState(null);
   const searchRef = useRef(null);
+  const { menu, openRowMenu, closeRowMenu } = useRowActionMenu();
 
   const limit = useMemo(() => Math.min(Math.max(Number(filters.limit || 100), 1), 500), [filters.limit]);
 
@@ -1755,6 +1854,10 @@ function FeatsPage({ onNavigate }) {
                     data-row-id={row.FeatId}
                     onClick={() => setSelected(row)}
                     onDoubleClick={() => setSelectedFeat(row)}
+                    onContextMenu={(event) => {
+                      setSelected(row);
+                      openRowMenu(event, { id: row.FeatId, link: row.AonUrl, idLabel: 'get FeatID' });
+                    }}
                     className={selected?.FeatId === row.FeatId ? 'selected' : ''}
                     title="Double-click to open full feat details"
                   >
@@ -1788,6 +1891,7 @@ function FeatsPage({ onNavigate }) {
         onClose={() => setSelectedFeat(null)}
       />
     )}
+    <RowActionMenu menu={menu} onClose={closeRowMenu} />
   </>
   );
 }
@@ -1805,6 +1909,7 @@ function EquipmentPage({ onNavigate }) {
   const [selected, setSelected] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const searchRef = useRef(null);
+  const { menu, openRowMenu, closeRowMenu } = useRowActionMenu();
 
   const limit = useMemo(() => Math.min(Math.max(Number(filters.limit || 100), 1), 500), [filters.limit]);
 
@@ -2023,6 +2128,10 @@ function EquipmentPage({ onNavigate }) {
                     data-row-id={row.EquipmentId}
                     onClick={() => setSelected(row)}
                     onDoubleClick={() => setSelectedEquipment(row)}
+                    onContextMenu={(event) => {
+                      setSelected(row);
+                      openRowMenu(event, { id: row.EquipmentId, link: row.AonUrl, idLabel: 'get EquipID' });
+                    }}
                     className={selected?.EquipmentId === row.EquipmentId ? 'selected' : ''}
                     title="Double-click to open full equipment details"
                   >
@@ -2054,6 +2163,7 @@ function EquipmentPage({ onNavigate }) {
         onClose={() => setSelectedEquipment(null)}
       />
     )}
+    <RowActionMenu menu={menu} onClose={closeRowMenu} />
   </>
   );
 }
