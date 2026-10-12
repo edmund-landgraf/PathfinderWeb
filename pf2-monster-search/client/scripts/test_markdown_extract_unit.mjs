@@ -1,7 +1,9 @@
 import {
   extractMarkdownDescriptionMonster,
   extractMarkdownDescriptionFeatsEquipSpells,
-  extractMarkdownRemainderFeatsEquipSpells
+  extractMarkdownRemainderFeatsEquipSpells,
+  htmlStatBlockToText,
+  looksLikeHtmlStatBlock
 } from '../src/markdownExtract.js';
 
 const featMD = `# 
@@ -68,6 +70,13 @@ if (!spellRemainder.includes('Heightened (+1)')) {
 }
 if (spellRemainder.includes('roaring blast of fire')) {
   failures.push('spell remainder still contains description');
+}
+
+const demiplaneHtml = `<p class="Stat-Blocks_Stat-Hanging"><strong>Str</strong> +3, <strong>Dex</strong> +1, <strong>Con</strong> +0</p><p class="Stat-Blocks_Stat-Hanging"><strong>Melee </strong><span class="one-action-icon icon" title="Single Action"></span> claw +8</p>`;
+if (!looksLikeHtmlStatBlock(demiplaneHtml)) failures.push('html stat block not detected');
+const demiplaneText = htmlStatBlockToText(demiplaneHtml);
+if (!demiplaneText.includes('**Str** +3') || !demiplaneText.includes('claw +8') || demiplaneText.includes('<p')) {
+  failures.push('html stat block was not converted to text');
 }
 
 const monsterDescription = extractMarkdownDescriptionMonster(monsterMD);

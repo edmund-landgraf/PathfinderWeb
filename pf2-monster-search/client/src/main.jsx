@@ -2,13 +2,16 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
 import SwaggerUI from 'swagger-ui-react';
-import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound, Settings, Plus } from 'lucide-react';
+import { Search, RotateCcw, ExternalLink, Image as ImageIcon, BookOpen, Award, Package, UserRound, Settings, Plus, Clipboard, Link as LinkIcon } from 'lucide-react';
 import remarkGfm from 'remark-gfm';
 import 'swagger-ui-react/swagger-ui.css';
 import {
   extractMarkdownDescriptionMonster,
+  extractMarkdownRemainderMonster,
   extractMarkdownDescriptionFeatsEquipSpells,
-  extractMarkdownRemainderFeatsEquipSpells
+  extractMarkdownRemainderFeatsEquipSpells,
+  htmlStatBlockToText,
+  looksLikeHtmlStatBlock
 } from './markdownExtract.js';
 import { utilitiesUpdatesDescription, webUpdatesDescription } from './updatesDescriptions.js';
 import { imageLibraryEntries } from './imagesLibrary.js';
@@ -643,9 +646,9 @@ function RowRangeBar({ enabled, total, limit, offset, loading, onChange }) {
   );
 }
 
-function SegmentedInput({ value, onChange, options }) {
+function SegmentedInput({ value, onChange, options, className = '' }) {
   return (
-    <div className="segmentedInput" role="radiogroup">
+    <div className={`segmentedInput ${className}`.trim()} role="radiogroup">
       {options.map((option) => (
         <button
           key={option.value}
@@ -899,12 +902,49 @@ function getMonsterPermalinkId() {
   return Number.isInteger(monsterId) && monsterId !== 0 ? monsterId : null;
 }
 
+function getMonsterCardId() {
+  const match = window.location.pathname.match(/^\/monsters\/(-?\d+)\/card$/i);
+  if (!match) return null;
+  const monsterId = Number(match[1]);
+  return Number.isInteger(monsterId) && monsterId !== 0 ? monsterId : null;
+}
+
+const defaultMonsterCardOptions = {
+  mode: 'full',
+  style: 'dark',
+  html: false
+};
+
+const monsterCardModes = [
+  { value: 'full', label: 'Full' },
+  { value: 'image', label: 'Image' },
+  { value: 'statblock', label: 'Stat block' },
+  { value: 'description', label: 'Description' },
+  { value: 'experimental', label: 'Front/back' }
+];
+
+const monsterCardStyles = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'plain', label: 'Plain' },
+  { value: 'light', label: 'Light' }
+];
+
 function monsterPermalink(monsterId, origin = window.location.origin) {
   return `${origin}/monsters/${monsterId}`;
 }
 
+function monsterCardLink(monsterId, options = {}, origin = window.location.origin) {
+  const params = new URLSearchParams();
+  if (options.mode && options.mode !== defaultMonsterCardOptions.mode) params.set('mode', options.mode);
+  if (options.style && options.style !== defaultMonsterCardOptions.style) params.set('style', options.style);
+  if (options.html) params.set('html', '1');
+  const query = params.toString();
+  return `${origin}/monsters/${monsterId}/card${query ? `?${query}` : ''}`;
+}
+
 function getCurrentPage() {
   const path = window.location.pathname.toLowerCase();
+  if (getMonsterCardId() != null) return 'monster-card';
   if (getMonsterPermalinkId() != null) return 'monster';
   if (path === '/equipment') return 'equipment';
   if (path === '/feats') return 'feats';
@@ -939,6 +979,10 @@ function AppRoutes() {
   function navigate(path) {
     window.history.pushState(null, '', path);
     setPage(getCurrentPage());
+  }
+
+  if (page === 'monster-card') {
+    return <MonsterCardPage monsterId={getMonsterCardId()} onNavigate={navigate} />;
   }
 
   if (page === 'monster') {
@@ -2473,6 +2517,19 @@ function CreatureSearchPage({
     }
   }
 
+  async function copyMonsterCardLink() {
+    if (rowMenu?.monsterId == null) return;
+    const url = monsterCardLink(rowMenu.monsterId);
+    try {
+      await copyTextToClipboard(url);
+      window.open(url, `monster-card-${rowMenu.monsterId}`, 'popup=yes,width=920,height=900');
+    } catch (err) {
+      setError(err.message || 'Could not copy monster card link.');
+    } finally {
+      closeRowMenu();
+    }
+  }
+
   async function deleteUserMonster() {
     const userMonsterId = rowMenu?.userMonsterId;
     const monsterId = rowMenu?.monsterId;
@@ -2713,6 +2770,7 @@ function CreatureSearchPage({
         onClose={closeRowMenu}
         items={[
           { label: 'Get Link', onClick: copyMonsterLink },
+          { label: 'Get Card Link', onClick: copyMonsterCardLink },
           { label: 'get monsterID', onClick: copyMonsterId },
           ...(adminEnabled && rowMenu.userMonsterId ? [
             { label: 'delete', onClick: deleteUserMonster }
@@ -2801,6 +2859,494 @@ function MonsterDirectPage({ monsterId, onNavigate }) {
           onArtUploaded={(_, imageUrl) => setMonster((prev) => (prev ? { ...prev, ImageUrl: imageUrl } : prev))}
         />
       )}
+    </div>
+  );
+}
+
+function parseMonsterCardOptions() {
+  const params = new URLSearchParams(window.location.search);
+  const mode = monsterCardModes.some((option) => option.value === params.get('mode'))
+    ? params.get('mode')
+    : defaultMonsterCardOptions.mode;
+  const style = monsterCardStyles.some((option) => option.value === params.get('style'))
+    ? params.get('style')
+    : defaultMonsterCardOptions.style;
+
+  return {
+    mode,
+    style,
+    html: params.get('html') === '1'
+  };
+}
+
+function updateMonsterCardUrl(monsterId, options) {
+  window.history.replaceState(null, '', monsterCardLink(monsterId, options, window.location.origin));
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function buildHtmlLine(label, value) {
+  const displayValue = value === null || value === undefined || value === '' ? '-' : value;
+  return `<div><strong>${escapeHtml(label)}</strong> ${escapeHtml(displayValue)}</div>`;
+}
+
+const experimentalStandardRuleLabels = [
+  'Source',
+  'Perception',
+  'Languages',
+  'Skills',
+  'Str',
+  'Dex',
+  'Con',
+  'Int',
+  'Wis',
+  'Cha',
+  'AC',
+  'Fort',
+  'Ref',
+  'Will',
+  'HP',
+  'Immunities',
+  'Resistances',
+  'Weaknesses',
+  'Speed',
+  'Melee',
+  'Ranged',
+  'Divine Innate Spells',
+  'Primal Innate Spells',
+  'Occult Innate Spells',
+  'Arcane Innate Spells',
+  'Divine Prepared Spells',
+  'Primal Prepared Spells',
+  'Occult Prepared Spells',
+  'Arcane Prepared Spells',
+  'Divine Spontaneous Spells',
+  'Primal Spontaneous Spells',
+  'Occult Spontaneous Spells',
+  'Arcane Spontaneous Spells',
+  'Rituals'
+];
+
+function normalizeMarkdownLabel(line) {
+  return line
+    .replace(/^[-*]\s+/, '')
+    .replace(/^\*\*/, '')
+    .replace(/\*\*/g, '')
+    .trim();
+}
+
+function getMarkdownRuleLabel(line) {
+  const normalized = normalizeMarkdownLabel(line);
+  const match = normalized.match(/^([A-Za-z][A-Za-z\s]+?)(?:\s|:|$)/);
+  return match?.[1]?.trim() || '';
+}
+
+function isExperimentalStandardRuleLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed === '---' || trimmed.startsWith('#') || trimmed.startsWith('![')) return true;
+  const normalized = normalizeMarkdownLabel(trimmed).toLowerCase();
+  return experimentalStandardRuleLabels.some((standardLabel) => (
+    normalized === standardLabel.toLowerCase() ||
+    normalized.startsWith(`${standardLabel.toLowerCase()} `) ||
+    normalized.startsWith(`${standardLabel.toLowerCase()}:`)
+  ));
+}
+
+function splitExperimentalMonsterRules(rawMD) {
+  const statBlock = extractMarkdownRemainderMonster(rawMD);
+  if (!statBlock) return { standard: '', special: '' };
+
+  const standardLines = [];
+  const specialLines = [];
+  let target = standardLines;
+
+  for (const line of statBlock.split('\n')) {
+    const trimmed = line.trim();
+    if (isExperimentalStandardRuleLine(line)) {
+      target = standardLines;
+      if (trimmed && trimmed !== '---' && !trimmed.startsWith('#') && !trimmed.startsWith('![')) {
+        standardLines.push(line);
+      }
+      continue;
+    }
+
+    target = specialLines;
+    target.push(line);
+  }
+
+  return {
+    standard: standardLines.join('\n').trim(),
+    special: specialLines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  };
+}
+
+const experimentalFrontCoreLabels = new Set([
+  'source',
+  'perception',
+  'languages',
+  'skills',
+  'str',
+  'dex',
+  'con',
+  'int',
+  'wis',
+  'cha',
+  'ac',
+  'fort',
+  'ref',
+  'will',
+  'hp',
+  'immunities',
+  'resistances',
+  'weaknesses',
+  'speed'
+]);
+
+function getExperimentalFrontExtraMarkdown(standardMarkdown) {
+  return String(standardMarkdown || '')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      const label = getMarkdownRuleLabel(trimmed).toLowerCase();
+      return !experimentalFrontCoreLabels.has(label);
+    })
+    .join('\n')
+    .trim();
+}
+
+function stripMarkdownFormatting(value) {
+  return String(value || '')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getExperimentalAbilityTitle(line) {
+  const trimmed = line.trim();
+  const heading = trimmed.match(/^#{2,4}\s+(.+)$/);
+  if (heading) return { title: heading[1].trim(), remainder: '' };
+
+  const boldLead = trimmed.match(/^\*\*([^*]+)\*\*\s*(.*)$/);
+  if (boldLead && !isExperimentalCoreRuleLine(trimmed)) {
+    const label = boldLead[1].trim().toLowerCase();
+    if ([
+      'requirements',
+      'requirement',
+      'trigger',
+      'effect',
+      'damage',
+      'critical success',
+      'success',
+      'failure',
+      'critical failure'
+    ].includes(label)) {
+      return null;
+    }
+
+    return { title: boldLead[1].trim(), remainder: boldLead[2].trim() };
+  }
+
+  return null;
+}
+
+function isExperimentalCoreRuleLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed === '---' || trimmed.startsWith('#') || trimmed.startsWith('![')) return true;
+  const normalized = normalizeMarkdownLabel(trimmed).toLowerCase();
+  return [...experimentalFrontCoreLabels].some((label) => (
+    normalized === label ||
+    normalized.startsWith(`${label} `) ||
+    normalized.startsWith(`${label}:`)
+  ));
+}
+
+function getExperimentalAbilities(rawMD) {
+  const statBlock = extractMarkdownRemainderMonster(rawMD);
+  if (!statBlock) return [];
+
+  const abilities = [];
+  let current = null;
+
+  function pushCurrent() {
+    if (!current) return;
+    const body = current.lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (current.title || body) abilities.push({ ...current, body });
+    current = null;
+  }
+
+  for (const line of statBlock.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed && !current) continue;
+
+    const headingMatch = trimmed.match(/^#{2,4}\s+(.+)$/);
+    if (headingMatch) {
+      pushCurrent();
+      current = { title: headingMatch[1].trim(), lines: [] };
+      continue;
+    }
+
+    const titleMatch = getExperimentalAbilityTitle(line);
+    if (titleMatch) {
+      pushCurrent();
+      current = { title: titleMatch.title, lines: [] };
+      if (titleMatch.remainder) current.lines.push(titleMatch.remainder);
+      continue;
+    }
+
+    if (!current) {
+      if (isExperimentalCoreRuleLine(line)) continue;
+      current = { title: 'Special', lines: [] };
+    }
+
+    if (trimmed || current.lines.length) current.lines.push(line);
+  }
+
+  pushCurrent();
+  return abilities.filter((ability) => ability.body || ability.title !== 'Special');
+}
+
+function compactRulesMarkdown(markdown) {
+  return String(markdown || '')
+    .replace(/\*\*Three Actions\*\*/gi, '**◆◆◆**')
+    .replace(/\*\*Two Actions\*\*/gi, '**◆◆**')
+    .replace(/\*\*(?:Single|One) Action\*\*/gi, '**◆**')
+    .replace(/\*\*Reaction\*\*/gi, '**↺**')
+    .replace(/\*\*Free Action\*\*/gi, '**◇**')
+    .replace(/�/g, '◆')
+    .trim();
+}
+
+function getExperimentalActionBadges(ability) {
+  const text = stripMarkdownFormatting(`${ability.title}\n${ability.body}`).toLowerCase();
+  const badges = [];
+
+  if (/three actions?/.test(text)) badges.push({ symbol: '◆◆◆', label: 'Three actions' });
+  else if (/two actions?/.test(text)) badges.push({ symbol: '◆◆', label: 'Two actions' });
+  else if (/(single|one) action/.test(text)) badges.push({ symbol: '◆', label: 'One action' });
+
+  if (/\breaction\b|reactive strike/.test(text)) badges.push({ symbol: '↺', label: 'Reaction' });
+  if (/free action/.test(text)) badges.push({ symbol: '◇', label: 'Free action' });
+  if (/\bmelee\b|\branged\b|\bstrike\b|damage\b/.test(text)) badges.push({ symbol: '⚔', label: 'Strike or damage' });
+  if (/\btrigger\b/.test(text)) badges.push({ symbol: '!', label: 'Trigger' });
+
+  return badges;
+}
+
+function buildMonsterCardHtml(monster, options) {
+  const rawMD = getCaseInsensitiveField(monster, 'RawMD') ?? '';
+  const cardMarkdown = monsterCardMarkdown(rawMD);
+  const description = cardMarkdown.descriptionMD;
+  const statBlock = cardMarkdown.statBlockMD;
+  const experimentalRules = splitExperimentalMonsterRules(rawMD);
+  const imageUrl = getMonsterImageUrl(monster, 'full');
+  const showImage = options.mode === 'full' || options.mode === 'image';
+  const showStats = options.mode === 'full' || options.mode === 'statblock';
+  const showDescription = options.mode === 'full' || options.mode === 'description';
+  const showExperimental = options.mode === 'experimental';
+  const palette = options.style === 'light'
+    ? { bg: '#fbf7f1', fg: '#251a14', accent: '#6f3d1d', panel: '#fffaf3', line: '#d9c7b4' }
+    : options.style === 'plain'
+      ? { bg: '#ffffff', fg: '#171717', accent: '#171717', panel: '#ffffff', line: '#d5d5d5' }
+      : { bg: '#17120f', fg: '#f4efe8', accent: '#f5d2aa', panel: '#211815', line: '#4b3a31' };
+  const imageMarkup = showImage && imageUrl
+    ? `<img src="${escapeHtml(new URL(imageUrl, window.location.origin).href)}" alt="${escapeHtml(monster.Name)}" />`
+    : '';
+  const statsMarkup = showStats
+    ? `<section class="stats">
+      ${buildHtmlLine('Level', monster.Level)}
+      ${buildHtmlLine('Rarity', monster.Rarity)}
+      ${buildHtmlLine('Size', monster.Size)}
+      ${buildHtmlLine('Alignment', monster.Alignment)}
+      ${buildHtmlLine('HP', monster.HP)}
+      ${buildHtmlLine('AC', monster.AC)}
+      ${buildHtmlLine('Fortitude', monster.Fortitude)}
+      ${buildHtmlLine('Reflex', monster.Reflex)}
+      ${buildHtmlLine('Will', monster.Will)}
+      ${buildHtmlLine('Perception', monster.Perception)}
+      ${buildHtmlLine('Speed', monster.Speed)}
+      ${buildHtmlLine('Skills', monster.Skills)}
+      ${buildHtmlLine('Languages', monster.Languages)}
+    </section>`
+    : '';
+  const descriptionMarkup = showDescription && description
+    ? `<section class="description"><p>${escapeHtml(description).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br />')}</p></section>`
+    : '';
+  const statBlockMarkup = showStats && statBlock
+    ? `<section class="rule-text"><pre>${escapeHtml(statBlock)}</pre></section>`
+    : '';
+  const experimentalFrontExtra = getExperimentalFrontExtraMarkdown(experimentalRules.standard);
+  const experimentalMarkup = showExperimental
+    ? `<section class="experimental">
+        <div>
+          <h2>Front</h2>
+          <pre>${escapeHtml(experimentalFrontExtra || experimentalRules.standard || 'No standard lines found.')}</pre>
+        </div>
+        <div>
+          <h2>Back</h2>
+          <pre>${escapeHtml(experimentalRules.special || 'No special lines found.')}</pre>
+        </div>
+      </section>`
+    : '';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(monster.Name || 'Creature card')}</title>
+  <style>
+    body { margin: 0; padding: 24px; background: ${palette.bg}; color: ${palette.fg}; font-family: Georgia, serif; }
+    .card { max-width: 780px; border: 1px solid ${palette.line}; background: ${palette.panel}; border-radius: 12px; padding: 22px; }
+    h1 { margin: 0; color: ${palette.accent}; font-size: 30px; }
+    .subtitle { margin: 6px 0 18px; opacity: .82; }
+    img { display: block; max-width: min(100%, 320px); max-height: 360px; object-fit: contain; margin: 0 0 18px; border-radius: 8px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 14px; margin: 16px 0; }
+    .description { margin-top: 16px; line-height: 1.55; }
+    .rule-text { margin-top: 18px; border-top: 1px solid ${palette.line}; padding-top: 16px; }
+    .rule-text pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Georgia, serif; line-height: 1.5; }
+    .experimental { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+    .experimental > div { border: 1px solid ${palette.line}; border-radius: 10px; padding: 14px; }
+    .experimental h2 { margin: 0 0 10px; color: ${palette.accent}; font-size: 18px; }
+    .experimental pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Georgia, serif; line-height: 1.5; }
+    @media (max-width: 760px) { .experimental { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <article class="card">
+    <h1>${escapeHtml(monster.Name)}</h1>
+    <div class="subtitle">Creature ${escapeHtml(monster.Level ?? '?')} · ${escapeHtml(monster.Rarity || '-')} · ${escapeHtml(monster.Size || '-')}</div>
+    ${imageMarkup}
+    ${statsMarkup}
+    ${statBlockMarkup}
+    ${descriptionMarkup}
+    ${experimentalMarkup}
+  </article>
+</body>
+</html>`;
+}
+
+function MonsterCardPage({ monsterId, onNavigate }) {
+  const [monster, setMonster] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [options, setOptions] = useState(parseMonsterCardOptions);
+  const [copyStatus, setCopyStatus] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetchApi(`/api/monsters/${monsterId}`);
+        if (res.status === 404) throw new Error('Monster not found');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const data = await res.json();
+        if (!cancelled) setMonster(data);
+      } catch (err) {
+        if (!cancelled) {
+          setMonster(null);
+          setError(err.message || String(err));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [monsterId]);
+
+  useEffect(() => {
+    updateMonsterCardUrl(monsterId, options);
+  }, [monsterId, options]);
+
+  const html = useMemo(() => (
+    monster ? buildMonsterCardHtml(monster, options) : ''
+  ), [monster, options]);
+
+  function setOption(key, value) {
+    setCopyStatus('');
+    setOptions((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function copyCardLink() {
+    await copyTextToClipboard(monsterCardLink(monsterId, options));
+    setCopyStatus('Link copied');
+  }
+
+  async function copyHtml() {
+    await copyTextToClipboard(html);
+    setCopyStatus('HTML copied');
+  }
+
+  return (
+    <div className={`app monsterCardPage monsterCardTheme-${options.style} monsterCardMode-${options.mode}`}>
+      <header className="topbar monsterCardTopbar">
+        <div>
+          <h1>{monster?.Name || 'Creature card'}</h1>
+          <p>Read-only statblock and summary card.</p>
+        </div>
+      </header>
+
+      <main className="monsterCardShell">
+        <div className="monsterCardToolbar" aria-label="Card options">
+          <div className="monsterCardControlRows">
+            <SegmentedInput
+              value={options.mode}
+              onChange={(value) => setOption('mode', value)}
+              options={monsterCardModes}
+              className="monsterCardModeInput"
+            />
+            <SegmentedInput
+              value={options.style}
+              onChange={(value) => setOption('style', value)}
+              options={monsterCardStyles}
+              className="monsterCardStyleInput"
+            />
+          </div>
+          <div className="monsterCardActionRow">
+            <label className="monsterCardSwitch">
+              <input
+                type="checkbox"
+                checked={options.html}
+                onChange={(event) => setOption('html', event.target.checked)}
+              />
+              HTML
+            </label>
+            <button type="button" className="monsterCardCopyButton" onClick={copyCardLink}>
+              <LinkIcon size={16} /> Copy link
+            </button>
+            {options.html && (
+              <button type="button" className="monsterCardCopyHtmlButton" onClick={copyHtml} disabled={!html}>
+                <Clipboard size={16} /> Copy HTML
+              </button>
+            )}
+            {copyStatus && <span className="monsterCardStatus">{copyStatus}</span>}
+          </div>
+        </div>
+
+        {loading && <p className="monsterDirectStatus">Loading...</p>}
+        {error && <p className="monsterDirectStatus error">{error}</p>}
+        {monster && <MonsterSummaryCard monster={monster} options={options} />}
+
+        {options.html && html && (
+          <textarea className="monsterCardHtml" readOnly value={html} aria-label="Generated card HTML" />
+        )}
+      </main>
     </div>
   );
 }
@@ -3021,6 +3567,220 @@ function DetailCard({ monster }) {
   );
 }
 
+function monsterCardMarkdown(rawMD) {
+  if (looksLikeHtmlStatBlock(rawMD)) {
+    return { descriptionMD: '', statBlockMD: htmlStatBlockToText(rawMD) };
+  }
+  return {
+    descriptionMD: extractMarkdownDescriptionMonster(rawMD),
+    statBlockMD: extractMarkdownRemainderMonster(rawMD)
+  };
+}
+
+function MonsterSummaryCard({ monster, options }) {
+  const { rawMD } = splitEntityFields(monster);
+  const { descriptionMD, statBlockMD } = useMemo(() => monsterCardMarkdown(rawMD), [rawMD]);
+  const imageUrl = getMonsterImageUrl(monster, 'full');
+  const showImage = options.mode === 'full' || options.mode === 'image';
+  const showStats = options.mode === 'full' || options.mode === 'statblock';
+  const showDescription = options.mode === 'full' || options.mode === 'description';
+  const showExperimental = options.mode === 'experimental';
+
+  return (
+    <article className="monsterSummaryCard" aria-label={`${monster.Name} read-only card`}>
+      <header className="monsterSummaryHeader">
+        <div>
+          <h2>{monster.Name}</h2>
+          <p>
+            Creature {monster.Level ?? '?'} · {monster.Rarity || '-'} · {monster.Size || '-'} · {monster.Alignment || '-'}
+          </p>
+        </div>
+        {monster.SourceBook && (
+          <span className="monsterSummarySource">
+            <SourceBookLinks
+              sourceBook={monster.SourceBook}
+              sourcePurchaseUrl={monster.SourcePurchaseURL}
+              sourcePage={monster.SourcePage}
+              linkClassName="detail-link"
+            />
+          </span>
+        )}
+      </header>
+
+      {showImage && imageUrl && (
+        <img className="monsterSummaryImage" src={imageUrl} alt={monster.Name} />
+      )}
+
+      {showExperimental && (
+        <ExperimentalMonsterCard monster={monster} rawMD={rawMD} />
+      )}
+
+      {showStats && (
+        <>
+          <section className="monsterSummaryStats" aria-label="Stat block">
+            {[
+              ['HP', monster.HP],
+              ['AC', monster.AC],
+              ['Fortitude', monster.Fortitude],
+              ['Reflex', monster.Reflex],
+              ['Will', monster.Will],
+              ['Perception', monster.Perception],
+              ['Speed', monster.Speed],
+              ['Skills', monster.Skills],
+              ['Languages', monster.Languages],
+              ['Senses', monster.Senses],
+              ['Str', signedStat(monster.StrMod)],
+              ['Dex', signedStat(monster.DexMod)],
+              ['Con', signedStat(monster.ConMod)],
+              ['Int', signedStat(monster.IntMod)],
+              ['Wis', signedStat(monster.WisMod)],
+              ['Cha', signedStat(monster.ChaMod)],
+              ['Items', monster.Items],
+              ['Family', monster.Family]
+            ].map(([label, value]) => (
+              <div key={label} className="monsterSummaryStat">
+                <strong>{label}</strong>
+                <span>{value ?? '-'}</span>
+              </div>
+            ))}
+          </section>
+
+          {statBlockMD && (
+            <MarkdownViewer rawMD={statBlockMD} className="monsterSummaryStatblock" />
+          )}
+        </>
+      )}
+
+      {showDescription && descriptionMD && (
+        <MarkdownViewer rawMD={descriptionMD} className="monsterSummaryDescription" />
+      )}
+    </article>
+  );
+}
+
+function signedStat(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value ?? '-';
+  return number > 0 ? `+${number}` : String(number);
+}
+
+function ExperimentalMonsterCard({ monster, rawMD }) {
+  const { special } = useMemo(() => splitExperimentalMonsterRules(rawMD), [rawMD]);
+  const abilities = useMemo(() => getExperimentalAbilities(rawMD), [rawMD]);
+  const traitChips = [
+    monster.Alignment,
+    monster.Size,
+    ...(monster.Family ? String(monster.Family).split(',').map((part) => part.trim()) : [])
+  ].filter(Boolean);
+
+  return (
+    <section className="monsterExperimentalCard" aria-label="Experimental front and back card">
+      <div className="monsterExperimentalPanel monsterExperimentalStandardPanel">
+        <div className="monsterExperimentalPanelHeader">
+          <span>Top</span>
+          <strong>Standard</strong>
+        </div>
+
+        <h3>{monster.Name} Creature {monster.Level ?? '?'}</h3>
+        <div className="monsterExperimentalChips">
+          {traitChips.map((trait) => <span key={trait}>{trait}</span>)}
+        </div>
+
+        <div className="monsterExperimentalLines">
+          <div><strong>Source</strong> {monster.SourceBook ? (
+            <SourceBookLinks
+              sourceBook={monster.SourceBook}
+              sourcePurchaseUrl={monster.SourcePurchaseURL}
+              sourcePage={monster.SourcePage}
+              linkClassName="detail-link"
+            />
+          ) : '-'}</div>
+          <div><strong>Perception</strong> {signedStat(monster.Perception)}{monster.Senses ? `; ${monster.Senses}` : ''}</div>
+          <div><strong>Languages</strong> {monster.Languages || '-'}</div>
+          <div><strong>Skills</strong> {monster.Skills || '-'}</div>
+        </div>
+
+        <div className="monsterExperimentalAbilityGrid">
+          {[
+            ['Str', monster.StrMod],
+            ['Dex', monster.DexMod],
+            ['Con', monster.ConMod],
+            ['Int', monster.IntMod],
+            ['Wis', monster.WisMod],
+            ['Cha', monster.ChaMod]
+          ].map(([label, value]) => (
+            <div key={label}><strong>{label}</strong> {signedStat(value)}</div>
+          ))}
+        </div>
+
+        <div className="monsterExperimentalLines monsterExperimentalDefenseLines">
+          <div><strong>AC</strong> {monster.AC ?? '-'}</div>
+          <div><strong>Fort</strong> {signedStat(monster.Fortitude)}, <strong>Ref</strong> {signedStat(monster.Reflex)}, <strong>Will</strong> {signedStat(monster.Will)}</div>
+          <div><strong>HP</strong> {monster.HP ?? '-'}</div>
+          {monster.Immunities && <div><strong>Immunities</strong> {monster.Immunities}</div>}
+          {monster.Resistances && <div><strong>Resistances</strong> {monster.Resistances}</div>}
+          {monster.Weaknesses && <div><strong>Weaknesses</strong> {monster.Weaknesses}</div>}
+          <div><strong>Speed</strong> {monster.Speed || '-'}</div>
+        </div>
+
+      </div>
+
+      <div className="monsterExperimentalBreak" />
+
+      <div className="monsterExperimentalAbilityArea">
+        <div className="monsterExperimentalPanelHeader monsterExperimentalAbilityAreaHeader">
+          <span>Bottom</span>
+          <strong>Abilities</strong>
+        </div>
+
+        {abilities.length ? (
+          <ExperimentalCompactAbilities abilities={abilities} />
+        ) : special ? (
+          <MarkdownViewer rawMD={special} className="monsterExperimentalSpecialMd" />
+        ) : (
+          <p className="monsterExperimentalEmpty">No abilities found.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ExperimentalCompactAbilities({ abilities }) {
+  return (
+    <div className="monsterExperimentalCompactBack">
+      {abilities.map((ability, index) => {
+        const badges = getExperimentalActionBadges(ability);
+        return (
+          <section className="monsterExperimentalAbility" key={`${ability.title}-${index}`}>
+            <div className="monsterExperimentalAbilityHead">
+              <h4>{ability.title}</h4>
+              {badges.length > 0 && (
+                <div className="monsterExperimentalBadges" aria-label="Action symbols">
+                  {badges.map((badge) => (
+                    <span key={`${ability.title}-${badge.symbol}-${badge.label}`} title={badge.label}>
+                      {badge.symbol}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            {ability.body && (
+              <div className="monsterExperimentalAbilityBody">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{ a: MarkdownLink }}
+                >
+                  {compactRulesMarkdown(ability.body)}
+                </ReactMarkdown>
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function isDuplicateSourceUrl(aonUrl, sourcePurchaseUrl) {
   if (!aonUrl) return true;
   return String(sourcePurchaseUrl || '')
@@ -3112,7 +3872,8 @@ function isSupportedMarkdownHref(href) {
     }
 
     return localMarkdownRoutes.has(url.pathname.toLowerCase())
-      || /^\/monsters\/-?\d+$/i.test(url.pathname);
+      || /^\/monsters\/-?\d+$/i.test(url.pathname)
+      || /^\/monsters\/-?\d+\/card$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -3663,6 +4424,16 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
                   Open AoN <ExternalLink size={13} />
                 </a>
               )}
+
+              <div className="modal-action-row">
+                <button
+                  type="button"
+                  className="modal-small-button"
+                  onClick={() => window.open(monsterCardLink(monster.MonsterId), `monster-card-${monster.MonsterId}`, 'popup=yes,width=920,height=900')}
+                >
+                  <Clipboard size={15} /> Stat card
+                </button>
+              </div>
             </div>
           </div>
 

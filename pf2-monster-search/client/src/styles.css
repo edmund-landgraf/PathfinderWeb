@@ -1343,6 +1343,644 @@ tr { cursor: pointer; }
   opacity: 0.85;
 }
 
+.modal-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.monsterCardPage {
+  min-height: 100vh;
+  background: #17120f;
+}
+
+.monsterCardTopbar {
+  width: min(760px, calc(100vw - 40px));
+  margin: 0 auto;
+  padding: 20px 0 14px;
+  background: transparent;
+}
+
+.monsterCardShell {
+  width: min(760px, calc(100vw - 40px));
+  margin: 0 auto;
+  padding: 14px 0 44px;
+}
+
+.monsterCardMode-experimental .monsterCardTopbar,
+.monsterCardMode-experimental .monsterCardShell {
+  width: min(1120px, calc(100vw - 40px));
+}
+
+.monsterCardToolbar {
+  display: grid;
+  gap: 10px;
+  margin: 0 auto 14px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  background: rgba(255,255,255,.052);
+}
+
+.monsterCardControlRows {
+  display: grid;
+  gap: 8px;
+}
+
+.monsterCardModeInput {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.monsterCardStyleInput {
+  width: min(360px, 100%);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.monsterCardModeInput .segmentedOption,
+.monsterCardStyleInput .segmentedOption {
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.monsterCardActionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.monsterCardSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 10px;
+  color: #f4efe8;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.monsterCardSwitch input {
+  width: auto;
+}
+
+.monsterCardStatus {
+  color: #f5d2aa;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.monsterSummaryCard {
+  width: min(780px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border: 1px solid rgba(245,210,170,.28);
+  border-radius: 12px;
+  background: #211815;
+  color: #f4efe8;
+  box-shadow: 0 16px 42px rgba(0,0,0,.30);
+}
+
+.monsterCardMode-experimental .monsterSummaryCard {
+  width: min(1120px, 100%);
+}
+
+.monsterSummaryHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(245,210,170,.18);
+}
+
+.monsterSummaryHeader h2 {
+  margin: 0;
+  color: #f5d2aa;
+  font-size: 30px;
+  letter-spacing: 0;
+}
+
+.monsterSummaryHeader p {
+  margin-top: 6px;
+  color: #d8c8b8;
+}
+
+.monsterSummarySource {
+  color: #cbbfb4;
+  font-size: 13px;
+  text-align: right;
+}
+
+.monsterSummaryImage {
+  display: block;
+  max-width: min(100%, 320px);
+  max-height: 360px;
+  object-fit: contain;
+  margin: 18px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.28);
+}
+
+.monsterSummaryStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.monsterSummaryStat {
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  background: rgba(255,255,255,.055);
+}
+
+.monsterSummaryStat strong {
+  display: block;
+  color: #f5d2aa;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.monsterSummaryStat span {
+  display: block;
+  margin-top: 3px;
+  color: #f4efe8;
+  line-height: 1.35;
+}
+
+.monsterSummaryDescription {
+  max-height: none;
+  margin-top: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.monsterSummaryStatblock {
+  max-height: none;
+  margin-top: 18px;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid rgba(245,210,170,.18);
+  border-radius: 0;
+  background: transparent;
+}
+
+.monsterSummaryStatblock > * {
+  max-width: none;
+}
+
+.monsterExperimentalCard {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.monsterExperimentalPanel {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(245,210,170,.22);
+  border-radius: 10px;
+  background: rgba(0,0,0,.13);
+}
+
+.monsterExperimentalPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(245,210,170,.18);
+  color: #cbbfb4;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.monsterExperimentalPanelHeader strong {
+  color: #f5d2aa;
+}
+
+.monsterExperimentalPanel h3 {
+  margin: 0 0 10px;
+  color: #f5d2aa;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.monsterExperimentalStandardPanel {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.15fr) minmax(240px, .85fr);
+  gap: 0 26px;
+}
+
+.monsterExperimentalStandardPanel h3,
+.monsterExperimentalStandardPanel .monsterExperimentalChips,
+.monsterExperimentalStandardPanel .monsterExperimentalLines {
+  grid-column: 1;
+}
+
+.monsterExperimentalStandardPanel .monsterExperimentalPanelHeader {
+  grid-column: 1 / -1;
+}
+
+.monsterExperimentalStandardPanel .monsterExperimentalAbilityGrid,
+.monsterExperimentalStandardPanel .monsterExperimentalDefenseLines {
+  grid-column: 2;
+}
+
+.monsterExperimentalChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+
+.monsterExperimentalChips span {
+  padding: 4px 9px;
+  border: 1px solid rgba(245,210,170,.22);
+  border-radius: 999px;
+  background: rgba(245,210,170,.08);
+  color: #f4efe8;
+  font-size: 12px;
+}
+
+.monsterExperimentalLines {
+  display: grid;
+  gap: 10px;
+  line-height: 1.45;
+}
+
+.monsterExperimentalLines strong,
+.monsterExperimentalAbilityGrid strong {
+  color: #f7d7b4;
+}
+
+.monsterExperimentalAbilityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 4px 0 0;
+}
+
+.monsterExperimentalDefenseLines {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(245,210,170,.18);
+}
+
+.monsterExperimentalBreak {
+  height: 1px;
+  background: rgba(245,210,170,.20);
+}
+
+.monsterExperimentalAbilityArea {
+  min-width: 0;
+}
+
+.monsterExperimentalAbilityAreaHeader {
+  margin-bottom: 10px;
+}
+
+.monsterExperimentalStandardMd,
+.monsterExperimentalSpecialMd {
+  max-height: none;
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.monsterExperimentalStandardMd > *,
+.monsterExperimentalSpecialMd > * {
+  max-width: none;
+}
+
+.monsterExperimentalEmpty {
+  color: #cbbfb4;
+}
+
+.monsterExperimentalCompactBack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.monsterExperimentalAbility {
+  padding: 10px 11px;
+  border: 1px solid rgba(245,210,170,.16);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+}
+
+.monsterExperimentalAbilityHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.monsterExperimentalAbility h4 {
+  margin: 0;
+  color: #f5d2aa;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.monsterExperimentalBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.monsterExperimentalBadges span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 2px 5px;
+  border: 1px solid rgba(245,210,170,.28);
+  border-radius: 999px;
+  background: rgba(245,210,170,.10);
+  color: #ffd7a8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.monsterExperimentalAbilityBody {
+  margin-top: 6px;
+  color: #f4efe8;
+  font-size: 13px;
+  line-height: 1.42;
+}
+
+.monsterExperimentalAbilityBody > * {
+  max-width: none;
+}
+
+.monsterExperimentalAbilityBody p,
+.monsterExperimentalAbilityBody ul,
+.monsterExperimentalAbilityBody ol {
+  margin: 0 0 6px;
+}
+
+.monsterExperimentalAbilityBody :last-child {
+  margin-bottom: 0;
+}
+
+.monsterExperimentalAbilityBody ul,
+.monsterExperimentalAbilityBody ol {
+  padding-left: 18px;
+}
+
+.monsterExperimentalAbilityBody strong {
+  color: #f7d7b4;
+}
+
+.monsterCardHtml {
+  display: block;
+  width: min(780px, 100%);
+  min-height: 260px;
+  margin: 16px auto 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.monsterCardTheme-light {
+  color: #251a14;
+  background: #fbf7f1;
+}
+
+.monsterCardTheme-light .topbar,
+.monsterCardTheme-light .monsterCardToolbar {
+  background: #fffaf3;
+  border-color: #d9c7b4;
+}
+
+.monsterCardTheme-light .segmentedInput,
+.monsterCardTheme-light .monsterCardSwitch,
+.monsterCardTheme-light .monsterCardCopyHtmlButton {
+  background: #f2e4d2;
+  border-color: #b79270;
+}
+
+.monsterCardTheme-light .segmentedOption {
+  color: #4b2c1d;
+}
+
+.monsterCardTheme-light .segmentedOption:hover:not(:disabled) {
+  background: rgba(111,61,29,.12);
+}
+
+.monsterCardTheme-light .segmentedOption.active {
+  color: #fffaf3;
+  background: #6f3d1d;
+  border-color: #9d6b45;
+}
+
+.monsterCardTheme-light .monsterCardCopyHtmlButton {
+  color: #4b2c1d;
+}
+
+.monsterCardCopyButton {
+  min-height: 38px;
+  margin-left: auto;
+  padding: 8px 16px;
+  border-color: #c78d4c;
+  background: #8d4f26;
+  color: #fff5e8;
+  font-weight: 900;
+}
+
+.monsterCardCopyButton:hover:not(:disabled) {
+  background: #a45d2e;
+}
+
+.monsterCardCopyHtmlButton {
+  min-height: 38px;
+  font-weight: 800;
+}
+
+.monsterCardTheme-light .topbar p,
+.monsterCardTheme-light .monsterCardStatus,
+.monsterCardTheme-light .monsterCardSwitch {
+  color: #6f3d1d;
+}
+
+.monsterCardTheme-light .monsterSummaryCard {
+  color: #251a14;
+  background: #fffaf3;
+  border-color: #d9c7b4;
+  box-shadow: 0 16px 42px rgba(80,52,28,.12);
+}
+
+.monsterCardTheme-light .monsterSummaryHeader,
+.monsterCardTheme-light .monsterSummaryStat {
+  border-color: #d9c7b4;
+}
+
+.monsterCardTheme-light .monsterSummaryHeader h2,
+.monsterCardTheme-light .monsterSummaryStat strong {
+  color: #6f3d1d;
+}
+
+.monsterCardTheme-light .monsterSummaryHeader p,
+.monsterCardTheme-light .monsterSummaryStat span,
+.monsterCardTheme-light .modal-md {
+  color: #251a14;
+}
+
+.monsterCardTheme-light .monsterSummaryStat,
+.monsterCardTheme-light .modal-md {
+  background: rgba(111,61,29,.06);
+}
+
+.monsterCardTheme-light .monsterExperimentalPanel {
+  background: rgba(111,61,29,.05);
+  border-color: #d9c7b4;
+}
+
+.monsterCardTheme-light .monsterExperimentalPanelHeader {
+  color: #76543a;
+  border-color: #d9c7b4;
+}
+
+.monsterCardTheme-light .monsterExperimentalPanelHeader strong,
+.monsterCardTheme-light .monsterExperimentalPanel h3,
+.monsterCardTheme-light .monsterExperimentalLines strong,
+.monsterCardTheme-light .monsterExperimentalAbilityGrid strong {
+  color: #6f3d1d;
+}
+
+.monsterCardTheme-light .monsterExperimentalChips span {
+  color: #4b2c1d;
+  background: rgba(111,61,29,.10);
+  border-color: #c9aa8d;
+}
+
+.monsterCardTheme-light .monsterExperimentalAbility {
+  background: rgba(111,61,29,.055);
+  border-color: #d7b99b;
+}
+
+.monsterCardTheme-light .monsterExperimentalAbility h4,
+.monsterCardTheme-light .monsterExperimentalAbilityBody strong {
+  color: #6f3d1d;
+}
+
+.monsterCardTheme-light .monsterExperimentalAbilityBody {
+  color: #251a14;
+}
+
+.monsterCardTheme-light .monsterExperimentalBadges span {
+  color: #fffaf3;
+  background: #6f3d1d;
+  border-color: #9d6b45;
+}
+
+.monsterCardTheme-light .monsterExperimentalAbilityGrid,
+.monsterCardTheme-light .monsterExperimentalDefenseLines {
+  border-color: #d9c7b4;
+}
+
+.monsterCardTheme-light .monsterCardCopyButton {
+  color: #fffaf3;
+  background: #6f3d1d;
+  border-color: #9d6b45;
+}
+
+.monsterCardTheme-plain {
+  color: #171717;
+  background: #fff;
+}
+
+.monsterCardTheme-plain .topbar,
+.monsterCardTheme-plain .monsterCardToolbar,
+.monsterCardTheme-plain .monsterSummaryCard {
+  color: #171717;
+  background: #fff;
+  border-color: #d5d5d5;
+  box-shadow: none;
+}
+
+.monsterCardTheme-plain .topbar p,
+.monsterCardTheme-plain .monsterCardSwitch,
+.monsterCardTheme-plain .monsterCardStatus,
+.monsterCardTheme-plain .monsterSummaryHeader p,
+.monsterCardTheme-plain .monsterSummaryStat span,
+.monsterCardTheme-plain .modal-md {
+  color: #171717;
+}
+
+.monsterCardTheme-plain .monsterSummaryHeader h2,
+.monsterCardTheme-plain .monsterSummaryStat strong {
+  color: #171717;
+}
+
+.monsterCardTheme-plain .monsterSummaryHeader,
+.monsterCardTheme-plain .monsterSummaryStat {
+  border-color: #d5d5d5;
+}
+
+.monsterCardTheme-plain .monsterSummaryStat,
+.monsterCardTheme-plain .modal-md {
+  background: #fff;
+}
+
+.monsterCardTheme-plain .monsterExperimentalPanel,
+.monsterCardTheme-plain .monsterExperimentalChips span,
+.monsterCardTheme-plain .monsterExperimentalAbility {
+  color: #171717;
+  background: #fff;
+  border-color: #d5d5d5;
+}
+
+.monsterCardTheme-plain .monsterExperimentalPanelHeader,
+.monsterCardTheme-plain .monsterExperimentalAbilityGrid,
+.monsterCardTheme-plain .monsterExperimentalDefenseLines {
+  border-color: #d5d5d5;
+}
+
+.monsterCardTheme-plain .monsterExperimentalPanelHeader,
+.monsterCardTheme-plain .monsterExperimentalPanelHeader strong,
+.monsterCardTheme-plain .monsterExperimentalPanel h3,
+.monsterCardTheme-plain .monsterExperimentalAbility h4,
+.monsterCardTheme-plain .monsterExperimentalAbilityBody,
+.monsterCardTheme-plain .monsterExperimentalAbilityBody strong,
+.monsterCardTheme-plain .monsterExperimentalLines strong,
+.monsterCardTheme-plain .monsterExperimentalAbilityGrid strong {
+  color: #171717;
+}
+
+.monsterCardTheme-plain .monsterExperimentalBadges span {
+  color: #fff;
+  background: #171717;
+  border-color: #171717;
+}
+
+.monsterCardTheme-plain .monsterCardCopyButton {
+  color: #fff;
+  background: #171717;
+  border-color: #171717;
+}
 
 .userMonsterModal {
   width: min(880px, 96vw);
@@ -1457,6 +2095,10 @@ tr { cursor: pointer; }
   .modal-stat-grid { grid-template-columns: repeat(2, minmax(90px, 1fr)); }
   .userMonsterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .modal-field-grid { grid-template-columns: 1fr; }
+  .monsterExperimentalStandardPanel { grid-template-columns: 1fr; }
+  .monsterExperimentalStandardPanel .monsterExperimentalAbilityGrid,
+  .monsterExperimentalStandardPanel .monsterExperimentalDefenseLines { grid-column: 1; }
+  .monsterExperimentalAbilityGrid { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(245,210,170,.18); }
 }
 
 @media (max-width: 640px) {
@@ -1467,4 +2109,14 @@ tr { cursor: pointer; }
   .homeActions { grid-template-columns: 1fr; }
   .userMonsterGrid { grid-template-columns: 1fr; }
   .userMonsterActions { justify-content: stretch; flex-direction: column; }
+  .monsterCardTopbar,
+  .monsterCardShell { width: min(100% - 24px, 760px); }
+  .monsterCardActionRow { align-items: stretch; }
+  .monsterCardCopyButton,
+  .monsterCardCopyHtmlButton { flex: 1 1 150px; justify-content: center; }
+  .monsterCardMode-experimental .monsterCardTopbar,
+  .monsterCardMode-experimental .monsterCardShell { width: min(100% - 24px, 1120px); }
+  .monsterExperimentalCompactBack { grid-template-columns: 1fr; }
+  .monsterSummaryHeader { display: block; }
+  .monsterSummarySource { display: block; margin-top: 8px; text-align: left; }
 }

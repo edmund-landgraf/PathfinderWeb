@@ -17,6 +17,7 @@ import {
   upsertMonsterImage
 } from './monsterImages.js';
 import { freePort, isPortListening, sleep } from './freePort.mjs';
+import { htmlStatBlockToText, looksLikeHtmlStatBlock } from '../../client/src/markdownExtract.js';
 
 dotenv.config({
   path: join(dirname(fileURLToPath(import.meta.url)), '../.env')
@@ -2207,7 +2208,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     logValue('Elapsed ms:', Date.now() - started);
 
     res.json({
-      rows,
+      rows: rows.map(presentCreature),
       total,
       limit,
       offset,
@@ -2325,7 +2326,7 @@ async function upsertUserMonster(req, res, { routeLabel, userMonsterIdFromRoute 
     const row = await fetchUserMonsterById(pool, userMonsterId);
     logValue(created ? 'Created user monster:' : 'Updated user monster:', userMonsterId);
     logValue('Elapsed ms:', Date.now() - started);
-    res.status(created ? 201 : 200).json(row);
+    res.status(created ? 201 : 200).json(presentCreature(row));
   } catch (err) {
     logError(err);
     res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
@@ -2493,6 +2494,11 @@ app.get('/api/npcs', (req, res) => queryCreatures(req, res, {
   npcMode: 'only'
 }));
 
+function presentCreature(row) {
+  if (!row || typeof row.RawMD !== 'string' || !looksLikeHtmlStatBlock(row.RawMD)) return row;
+  return { ...row, RawMD: htmlStatBlockToText(row.RawMD) };
+}
+
 app.get('/api/monsters/:monsterId', async (req, res) => {
   const started = Date.now();
   const monsterId = Number(req.params.monsterId);
@@ -2518,7 +2524,7 @@ app.get('/api/monsters/:monsterId', async (req, res) => {
     }
 
     logValue('Elapsed ms:', Date.now() - started);
-    res.json(row);
+    res.json(presentCreature(row));
   } catch (err) {
     logError(err);
     res.status(500).json({ error: getErrorMessage(err) });
