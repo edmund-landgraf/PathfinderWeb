@@ -53,12 +53,18 @@ function artCookieOptions(req) {
     crossOrigin = Boolean(origin);
   }
 
+  // localhost ports are the same site. SameSite=None + Secure on http://localhost
+  // is dropped by the browser, so the password succeeds and art stays locked.
+  const localhost = /^(localhost|127\.0\.0\.1)(:|$)/i.test(requestHost);
+  const https = Boolean(req.secure) || req.get('x-forwarded-proto') === 'https';
+  const crossSite = crossOrigin && !localhost;
+
   return {
     httpOnly: true,
     path: '/',
     maxAge: 12 * 60 * 60 * 1000,
-    sameSite: crossOrigin ? 'none' : 'lax',
-    secure: crossOrigin || req.secure || requestHost.startsWith('localhost')
+    sameSite: crossSite ? 'none' : 'lax',
+    secure: crossSite || https
   };
 }
 
