@@ -2361,6 +2361,52 @@ app.put('/api/user-monsters/:userMonsterId', (req, res, next) => {
   });
 });
 
+app.patch('/api/user-monsters/:userMonsterId/name', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+  if (!userMonsterId) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  let name;
+  try {
+    name = cleanString(req.body?.name ?? req.body?.Name, 255);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: getErrorMessage(err) });
+    return;
+  }
+
+  if (!name) {
+    res.status(400).json({ error: 'Name is required.' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('userMonsterId', sql.Int, userMonsterId)
+      .input('name', sql.NVarChar(255), name)
+      .query(`
+        UPDATE pf2.UserMonster
+        SET Name = @name, UpdatedAt = SYSUTCDATETIME()
+        WHERE UserMonsterId = @userMonsterId;
+      `);
+
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+
+    res.json({ UserMonsterId: userMonsterId, Name: name });
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
 app.delete('/api/user-monsters/:userMonsterId', async (req, res) => {
   if (rejectAdminIfLocked(req, res)) return;
 

@@ -359,6 +359,45 @@ function buildQuery(filters, offset, sortBy, sortDir) {
   return params.toString();
 }
 
+function readCreatureSearchState() {
+  const params = new URLSearchParams(window.location.search);
+  const filters = { ...emptyFilters };
+  for (const key of Object.keys(emptyFilters)) {
+    if (params.has(key)) filters[key] = params.get(key) ?? '';
+  }
+
+  const sortByParam = params.get('sortBy');
+  const sortBy = columns.some(([key]) => key === sortByParam) ? sortByParam : 'Name';
+  const offset = Math.max(0, Number(params.get('offset')) || 0);
+
+  return {
+    filters,
+    offset,
+    sortBy,
+    sortDir: params.get('sortDir') === 'desc' ? 'desc' : 'asc'
+  };
+}
+
+function syncCreatureSearchUrl(filters, offset, sortBy, sortDir) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === 'gameSystem' && value === emptyFilters.gameSystem) continue;
+    if (key === 'limit' && String(value) === emptyFilters.limit) continue;
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      params.set(key, String(value).trim());
+    }
+  }
+  if (offset) params.set('offset', String(offset));
+  if (sortBy !== 'Name') params.set('sortBy', sortBy);
+  if (sortDir !== 'asc') params.set('sortDir', sortDir);
+
+  const qs = params.toString();
+  const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+  if (`${window.location.pathname}${window.location.search}` !== next) {
+    window.history.replaceState(null, '', next);
+  }
+}
+
 function isNestedPopoutOpen() {
   return Boolean(document.querySelector('.md-popout-backdrop, .image-popout-backdrop'));
 }
@@ -726,7 +765,8 @@ function ArtProvider({ children }) {
       throw new Error(await readApiError(res));
     }
 
-    window.location.reload();
+    setUnlocked(true);
+    window.dispatchEvent(new Event('pf2-art-unlocked'));
     return true;
   }, []);
 
@@ -2242,8 +2282,12 @@ function TextAreaInput({ value, onChange, placeholder, rows = 4 }) {
 
 function getMonsterImageUrl(monster, variant = 'thumb') {
   if (!monster?.ImageUrl) return '';
-  if (monster.SourceType === 'my monsters' || monster.ContentType === 'user generated') return monster.ImageUrl.replace('/image/thumb', '/image');
-  return variant === 'full' ? `/api/monsters/${monster.MonsterId}/image` : monster.ImageUrl;
+  const isUser = monster.SourceType === 'my monsters' || monster.ContentType === 'user generated';
+  const localThumb = /\/image\/thumb(?:\?|$)/.test(monster.ImageUrl);
+  if ((isUser || localThumb) && variant === 'full') {
+    return monster.ImageUrl.replace('/image/thumb', '/image');
+  }
+  return monster.ImageUrl;
 }
 
 function isUserGeneratedMonster(monster) {
@@ -2383,13 +2427,14 @@ function CreatureSearchPage({
   allowUserAdd = false
 }) {
   const { adminEnabled } = useArt();
-  const [filters, setFilters] = useState(emptyFilters);
+  const initialSearch = useRef(readCreatureSearchState());
+  const [filters, setFilters] = useState(initialSearch.current.filters);
   const [lookups, setLookups] = useState({ rarity: [], size: [], alignment: [], family: [], sourceBook: [] });
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [sortBy, setSortBy] = useState('Name');
-  const [sortDir, setSortDir] = useState('asc');
+  const [offset, setOffset] = useState(initialSearch.current.offset);
+  const [sortBy, setSortBy] = useState(initialSearch.current.sortBy);
+  const [sortDir, setSortDir] = useState(initialSearch.current.sortDir);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
@@ -2399,9 +2444,43 @@ function CreatureSearchPage({
   // Grid layout toggle (right/below) — disabled for now
   // const [layout, setLayout] = useState('right');
   const searchRef = useRef(null);
+  const appliedSortKey = useRef(null);
+  const artQueryRef = useRef({ filters: emptyFilters, offset: 0, sortBy: 'Name', sortDir: 'asc' });
 
   const closeRowMenu = useCallback(() => setRowMenu(null), []);
 
+  artQueryRef.current = { filters, offset, sortBy, sortDir };
+
+  useEffect(() => {
+    function handleArtUnlocked() {
+      const query = artQueryRef.current;
+
+      (async () => {
+        try {
+          const qs = buildQuery(query.filters, query.offset, query.sortBy, query.sortDir);
+          const res = await fetchApi(`/api/${apiPath}?${qs}`);
+          if (!res.ok) throw new Error(await readApiError(res));
+          const data = await res.json();
+          const nextRows = data.rows || [];
+          const table = document.querySelector('.resultsPanel .tableWrap');
+          const scrollTop = table?.scrollTop ?? 0;
+          setRows(nextRows);
+          setTotal(data.total || 0);
+          setSelected((prev) => nextRows.find((row) => row.MonsterId === prev?.MonsterId) || prev);
+          setSelectedMonster((prev) => nextRows.find((row) => row.MonsterId === prev?.MonsterId) || prev);
+          requestAnimationFrame(() => {
+            const nextTable = document.querySelector('.resultsPanel .tableWrap');
+            if (nextTable) nextTable.scrollTop = scrollTop;
+          });
+        } catch (err) {
+          setError(err.message || String(err));
+        }
+      })();
+    }
+
+    window.addEventListener('pf2-art-unlocked', handleArtUnlocked);
+    return () => window.removeEventListener('pf2-art-unlocked', handleArtUnlocked);
+  }, [apiPath]);
 
   const limit = useMemo(() => Math.min(Math.max(Number(filters.limit || 100), 1), 500), [filters.limit]);
 
@@ -2427,6 +2506,7 @@ function CreatureSearchPage({
       setTotal(data.total || 0);
       setOffset(data.offset || 0);
       setSelected((data.rows || [])[0] || null);
+      syncCreatureSearchUrl(nextFilters, data.offset || 0, sortBy, sortDir);
     } catch (err) {
       setError(err.message || String(err));
     } finally {
@@ -2453,7 +2533,11 @@ function CreatureSearchPage({
   }, []);
 
   useEffect(() => {
-    search(0);
+    const key = `${sortBy}:${sortDir}`;
+    if (appliedSortKey.current === key) return;
+    const isFirst = appliedSortKey.current === null;
+    appliedSortKey.current = key;
+    search(isFirst ? initialSearch.current.offset : 0, isFirst ? initialSearch.current.filters : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortBy, sortDir]);
 
@@ -2525,6 +2609,44 @@ function CreatureSearchPage({
       window.open(url, `monster-card-${rowMenu.monsterId}`, 'popup=yes,width=920,height=900');
     } catch (err) {
       setError(err.message || 'Could not copy monster card link.');
+    } finally {
+      closeRowMenu();
+    }
+  }
+
+  async function renameUserMonster() {
+    const userMonsterId = rowMenu?.userMonsterId;
+    const monsterId = rowMenu?.monsterId;
+    if (!userMonsterId) return;
+
+    const currentName = rowMenu.name || '';
+    const nextName = window.prompt('Rename monster', currentName);
+    if (nextName === null) {
+      closeRowMenu();
+      return;
+    }
+
+    const name = nextName.trim();
+    if (!name || name === currentName) {
+      closeRowMenu();
+      return;
+    }
+
+    try {
+      const res = await fetchApi(`/api/user-monsters/${userMonsterId}/name`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+
+      setRows((prev) => prev.map((row) => (
+        row.UserMonsterId === userMonsterId ? { ...row, Name: name } : row
+      )));
+      setSelected((prev) => (prev?.MonsterId === monsterId ? { ...prev, Name: name } : prev));
+      setSelectedMonster((prev) => (prev?.MonsterId === monsterId ? { ...prev, Name: name } : prev));
+    } catch (err) {
+      setError(err.message || 'Could not rename custom monster.');
     } finally {
       closeRowMenu();
     }
@@ -2773,6 +2895,7 @@ function CreatureSearchPage({
           { label: 'Get Card Link', onClick: copyMonsterCardLink },
           { label: 'get monsterID', onClick: copyMonsterId },
           ...(adminEnabled && rowMenu.userMonsterId ? [
+            { label: 'Rename', onClick: renameUserMonster },
             { label: 'delete', onClick: deleteUserMonster }
           ] : [])
         ]}
@@ -4068,6 +4191,10 @@ function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) 
     ? <div className="noArt" aria-hidden="true" />
     : <span className="artFrame" aria-hidden="true" />;
 
+  useEffect(() => {
+    setFailed(false);
+  }, [imageUrl]);
+
   if (!artEnabled) return emptyFrame;
 
   if (!imageUrl || failed) {
@@ -4088,22 +4215,34 @@ function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) 
   );
 }
 
-function ModalArt({ imageUrl, alt, fallbackIcon, onImageOpen, canUpload = false, onEmptyClick }) {
+function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, canUpload = false, onEmptyClick }) {
   const { artEnabled } = useArt();
   const [failed, setFailed] = useState(false);
+  const [src, setSrc] = useState(imageUrl);
+
+  useEffect(() => {
+    setSrc(imageUrl);
+    setFailed(false);
+  }, [imageUrl]);
 
   if (!artEnabled) {
     return <div className="modal-no-art" aria-hidden="true" />;
   }
 
-  if (imageUrl && !failed) {
+  if (src && !failed) {
     return (
       <img
         className="modal-image modal-image-clickable"
-        src={imageUrl}
+        src={src}
         alt={alt}
         title="Double-click to view full size"
-        onError={() => setFailed(true)}
+        onError={() => {
+          if (fallbackUrl && src !== fallbackUrl) {
+            setSrc(fallbackUrl);
+            return;
+          }
+          setFailed(true);
+        }}
         onDoubleClick={(e) => {
           e.stopPropagation();
           onImageOpen();
@@ -4335,6 +4474,9 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
   const { artEnabled, artCanUpload } = useArt();
   const imageUrl = artEnabled ? getMonsterImageUrl(monster, 'full') : '';
+  const fallbackImageUrl = artEnabled && monster.ImageUrl && monster.ImageUrl !== imageUrl
+    ? monster.ImageUrl
+    : '';
 
   useEffect(() => {
     setIsMDPopoutOpen(false);
@@ -4390,6 +4532,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
           <div className="modal-header">
             <ModalArt
               imageUrl={imageUrl}
+              fallbackUrl={fallbackImageUrl}
               alt={monster.Name}
               fallbackIcon={<ImageIcon />}
               onImageOpen={() => setIsImagePopoutOpen(true)}
