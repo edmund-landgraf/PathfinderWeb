@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,8 +40,35 @@ const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
 const ADMIN_PWD = String(process.env.ADMIN_PWD || 'AmbaAdminOK');
 const ART_COOKIE = 'pf2_art';
 const ADMIN_COOKIE = 'pf2_admin';
-const artUnlockTokens = new Set();
-const adminUnlockTokens = new Set();
+const UNLOCK_TTL_MS = 12 * 60 * 60 * 1000;
+const UNLOCK_SECRET = String(process.env.UNLOCK_SECRET || process.env.ADMIN_PWD || 'AmbaAdminOK');
+
+function signUnlock(kind) {
+  const exp = Date.now() + UNLOCK_TTL_MS;
+  const payload = `${kind}.${exp}`;
+  const sig = createHmac('sha256', UNLOCK_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifyUnlock(token, kind) {
+  const value = String(token || '');
+  const splitAt = value.lastIndexOf('.');
+  const expAt = value.indexOf('.');
+  if (expAt <= 0 || splitAt <= expAt) return false;
+
+  const tokenKind = value.slice(0, expAt);
+  const exp = value.slice(expAt + 1, splitAt);
+  const sig = value.slice(splitAt + 1);
+  if (tokenKind !== kind || !/^\d+$/.test(exp) || !sig) return false;
+  if (Number(exp) <= Date.now()) return false;
+
+  const payload = `${tokenKind}.${exp}`;
+  const expected = createHmac('sha256', UNLOCK_SECRET).update(payload).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 function artCookieOptions(req) {
   const origin = String(req.headers.origin || '');
@@ -62,7 +89,7 @@ function artCookieOptions(req) {
   return {
     httpOnly: true,
     path: '/',
-    maxAge: 12 * 60 * 60 * 1000,
+    maxAge: UNLOCK_TTL_MS,
     sameSite: crossSite ? 'none' : 'lax',
     secure: crossSite || https
   };
@@ -95,8 +122,7 @@ function parseCookies(req) {
 
 function isArtEnabled(req) {
   if (ENABLE_ART) return true;
-  const token = parseCookies(req)[ART_COOKIE];
-  return Boolean(token && artUnlockTokens.has(token));
+  return verifyUnlock(parseCookies(req)[ART_COOKIE], 'art');
 }
 
 function isArtUploadAllowed(req) {
@@ -104,8 +130,7 @@ function isArtUploadAllowed(req) {
 }
 
 function isAdminEnabled(req) {
-  const token = parseCookies(req)[ADMIN_COOKIE];
-  return Boolean(token && adminUnlockTokens.has(token));
+  return verifyUnlock(parseCookies(req)[ADMIN_COOKIE], 'admin');
 }
 
 function rejectArtIfLocked(req, res) {
@@ -936,9 +961,7 @@ app.post('/api/art/unlock', (req, res) => {
     return;
   }
 
-  const token = randomBytes(32).toString('hex');
-  artUnlockTokens.add(token);
-  res.cookie(ART_COOKIE, token, artCookieOptions(req));
+  res.cookie(ART_COOKIE, signUnlock('art'), artCookieOptions(req));
   res.json({ ok: true, enableArt: false, artUnlocked: true });
 });
 
@@ -948,9 +971,7 @@ app.post('/api/admin/unlock', (req, res) => {
     return;
   }
 
-  const token = randomBytes(32).toString('hex');
-  adminUnlockTokens.add(token);
-  res.cookie(ADMIN_COOKIE, token, artCookieOptions(req));
+  res.cookie(ADMIN_COOKIE, signUnlock('admin'), artCookieOptions(req));
   res.json({ ok: true, adminUnlocked: true });
 });
 
