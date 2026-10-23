@@ -197,6 +197,28 @@ async function fetchApi(url, options = {}) {
   });
 }
 
+const HEAVY_DETAIL_FIELDS = ['RawHtml', 'RawText', 'RawMD', 'RawJson'];
+
+async function fetchRecord(path) {
+  const res = await fetchApi(path);
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json();
+}
+
+function mergeHeavyFields(row, detail) {
+  const next = { ...row };
+  if (!detail || typeof detail !== 'object') return next;
+  for (const key of HEAVY_DETAIL_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(detail, key)) next[key] = detail[key];
+  }
+  return next;
+}
+
+async function loadHeavyDetail(row, idField, path) {
+  const detail = await fetchRecord(`${path}/${row[idField]}`);
+  return mergeHeavyFields(row, detail);
+}
+
 const emptyFilters = {
   name: '',
   levelMin: '',
@@ -787,7 +809,7 @@ function ArtProvider({ children }) {
 
   const value = useMemo(() => ({
     artEnabled: enableArtByEnv === true || unlocked,
-    artCanUpload: enableArtByEnv === false && unlocked,
+    artCanUpload: enableArtByEnv === false && adminUnlocked,
     showArtUnlock: enableArtByEnv === false,
     adminEnabled: adminUnlocked,
     unlockArt,
@@ -852,7 +874,7 @@ function SettingsMenu() {
 
   const passwordTitle = passwordTarget === 'admin' ? 'Enable Admin' : 'Enable Art';
   const passwordDescription = passwordTarget === 'admin'
-    ? 'Enter the admin password to enable protected actions.'
+    ? 'Enter the admin secret to create, edit, and delete custom creatures.'
     : 'Enter the password to show preview and modal art.';
 
   return (
@@ -1553,10 +1575,24 @@ function SpellsPage({ onNavigate }) {
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
-  const handleModalRowChange = useCallback((row) => {
-    setSelectedSpell(row);
+  const detailSeq = useRef(0);
+
+  const openSpellDetail = useCallback((row) => {
+    const seq = ++detailSeq.current;
     setSelected(row);
+    setError('');
+    loadHeavyDetail(row, 'SpellId', '/api/spells')
+      .then((detail) => {
+        if (detailSeq.current === seq) setSelectedSpell(detail);
+      })
+      .catch((err) => {
+        if (detailSeq.current === seq) setError(err.message || String(err));
+      });
   }, []);
+
+  const handleModalRowChange = useCallback((row) => {
+    openSpellDetail(row);
+  }, [openSpellDetail]);
 
   const handleGridRowChange = useCallback((row) => {
     setSelected(row);
@@ -1678,7 +1714,7 @@ function SpellsPage({ onNavigate }) {
                     key={row.SpellId}
                     data-row-id={row.SpellId}
                     onClick={() => setSelected(row)}
-                    onDoubleClick={() => setSelectedSpell(row)}
+                    onDoubleClick={() => openSpellDetail(row)}
                     onContextMenu={(event) => {
                       setSelected(row);
                       openRowMenu(event, { id: row.SpellId, link: row.AonUrl, idLabel: 'get SpellID' });
@@ -1815,10 +1851,24 @@ function FeatsPage({ onNavigate }) {
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
-  const handleModalRowChange = useCallback((row) => {
-    setSelectedFeat(row);
+  const detailSeq = useRef(0);
+
+  const openFeatDetail = useCallback((row) => {
+    const seq = ++detailSeq.current;
     setSelected(row);
+    setError('');
+    loadHeavyDetail(row, 'FeatId', '/api/feats')
+      .then((detail) => {
+        if (detailSeq.current === seq) setSelectedFeat(detail);
+      })
+      .catch((err) => {
+        if (detailSeq.current === seq) setError(err.message || String(err));
+      });
   }, []);
+
+  const handleModalRowChange = useCallback((row) => {
+    openFeatDetail(row);
+  }, [openFeatDetail]);
 
   const handleGridRowChange = useCallback((row) => {
     setSelected(row);
@@ -1937,7 +1987,7 @@ function FeatsPage({ onNavigate }) {
                     key={row.FeatId}
                     data-row-id={row.FeatId}
                     onClick={() => setSelected(row)}
-                    onDoubleClick={() => setSelectedFeat(row)}
+                    onDoubleClick={() => openFeatDetail(row)}
                     onContextMenu={(event) => {
                       setSelected(row);
                       openRowMenu(event, { id: row.FeatId, link: row.AonUrl, idLabel: 'get FeatID' });
@@ -2076,10 +2126,24 @@ function EquipmentPage({ onNavigate }) {
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
-  const handleModalRowChange = useCallback((row) => {
-    setSelectedEquipment(row);
+  const detailSeq = useRef(0);
+
+  const openEquipmentDetail = useCallback((row) => {
+    const seq = ++detailSeq.current;
     setSelected(row);
+    setError('');
+    loadHeavyDetail(row, 'EquipmentId', '/api/equipment')
+      .then((detail) => {
+        if (detailSeq.current === seq) setSelectedEquipment(detail);
+      })
+      .catch((err) => {
+        if (detailSeq.current === seq) setError(err.message || String(err));
+      });
   }, []);
+
+  const handleModalRowChange = useCallback((row) => {
+    openEquipmentDetail(row);
+  }, [openEquipmentDetail]);
 
   const handleGridRowChange = useCallback((row) => {
     setSelected(row);
@@ -2211,7 +2275,7 @@ function EquipmentPage({ onNavigate }) {
                     key={row.EquipmentId}
                     data-row-id={row.EquipmentId}
                     onClick={() => setSelected(row)}
-                    onDoubleClick={() => setSelectedEquipment(row)}
+                    onDoubleClick={() => openEquipmentDetail(row)}
                     onContextMenu={(event) => {
                       setSelected(row);
                       openRowMenu(event, { id: row.EquipmentId, link: row.AonUrl, idLabel: 'get EquipID' });
@@ -2693,10 +2757,24 @@ function CreatureSearchPage({
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd = Math.min(offset + limit, total);
 
-  const handleModalRowChange = useCallback((row) => {
-    setSelectedMonster(row);
+  const detailSeq = useRef(0);
+
+  const openMonsterDetail = useCallback((row) => {
+    const seq = ++detailSeq.current;
     setSelected(row);
+    setError('');
+    fetchRecord(`/api/monsters/${row.MonsterId}`)
+      .then((detail) => {
+        if (detailSeq.current === seq) setSelectedMonster(detail);
+      })
+      .catch((err) => {
+        if (detailSeq.current === seq) setError(err.message || String(err));
+      });
   }, []);
+
+  const handleModalRowChange = useCallback((row) => {
+    openMonsterDetail(row);
+  }, [openMonsterDetail]);
 
   const handleGridRowChange = useCallback((row) => {
     setSelected(row);
@@ -2803,7 +2881,7 @@ function CreatureSearchPage({
           <div className="actions">
             <button className="primary" onClick={() => search(0)} disabled={loading}><Search size={16} /> Search</button>
             <button onClick={reset} disabled={loading}><RotateCcw size={16} /> Reset</button>
-            {allowUserAdd && (
+            {allowUserAdd && adminEnabled && (
               <button type="button" onClick={() => setIsAddUserMonsterOpen(true)} disabled={loading}>
                 <Plus size={16} /> Add user monster
               </button>
@@ -2854,7 +2932,7 @@ function CreatureSearchPage({
                     key={row.MonsterId}
                     data-row-id={row.MonsterId}
                     onClick={() => setSelected(row)}
-                    onDoubleClick={() => setSelectedMonster(row)}
+                    onDoubleClick={() => openMonsterDetail(row)}
                     onContextMenu={(event) => openMonsterRowMenu(event, row)}
                     className={selected?.MonsterId === row.MonsterId ? 'selected' : ''}
                     title={detailTitle}
@@ -2902,7 +2980,7 @@ function CreatureSearchPage({
       />
     )}
 
-    {allowUserAdd && isAddUserMonsterOpen && (
+    {allowUserAdd && adminEnabled && isAddUserMonsterOpen && (
       <AddUserMonsterModal
         lookups={lookups}
         onClose={() => setIsAddUserMonsterOpen(false)}

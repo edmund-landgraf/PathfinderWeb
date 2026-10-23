@@ -1,10 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getPool, sql } from './db.js';
 import {
   attachMonsterImageUrls,
@@ -18,6 +17,28 @@ import {
 } from './monsterImages.js';
 import { freePort, isPortListening, sleep } from './freePort.mjs';
 import { htmlStatBlockToText, looksLikeHtmlStatBlock } from '../../client/src/markdownExtract.js';
+import {
+  ADMIN_COOKIE,
+  ART_COOKIE,
+  UNLOCK_TTL_MS,
+  adminAttemptLimiter,
+  adminCookieSecret,
+  adminUnlockConfigured,
+  adminUnlockSecret,
+  artAttemptLimiter,
+  artCookieSecret,
+  artGloballyEnabled,
+  artPassword,
+  clientIp,
+  debugSqlEnabled,
+  hideArtUrls,
+  parsePage,
+  passwordMatches,
+  searchPayload,
+  signUnlock,
+  trustProxySetting,
+  verifyUnlock
+} from './accessControl.js';
 
 dotenv.config({
   path: join(dirname(fileURLToPath(import.meta.url)), '../.env')
@@ -28,47 +49,11 @@ const port = Number(process.env.PORT || 3333);
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const clientDistDir = join(rootDir, 'client', 'dist');
 
+app.set('trust proxy', trustProxySetting());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' }));
 
-const DEBUG_SQL =
-  String(process.env.DEBUG_SQL || 'true').toLowerCase() === 'true';
-
-const ENABLE_ART =
-  String(process.env.ENABLE_ART || 'true').toLowerCase() === 'true';
-const ENABLE_ART_PWD = String(process.env.ENABLE_ART_PWD || '');
-const ADMIN_PWD = String(process.env.ADMIN_PWD || 'AmbaAdminOK');
-const ART_COOKIE = 'pf2_art';
-const ADMIN_COOKIE = 'pf2_admin';
-const UNLOCK_TTL_MS = 12 * 60 * 60 * 1000;
-const UNLOCK_SECRET = String(process.env.UNLOCK_SECRET || process.env.ADMIN_PWD || 'AmbaAdminOK');
-
-function signUnlock(kind) {
-  const exp = Date.now() + UNLOCK_TTL_MS;
-  const payload = `${kind}.${exp}`;
-  const sig = createHmac('sha256', UNLOCK_SECRET).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
-}
-
-function verifyUnlock(token, kind) {
-  const value = String(token || '');
-  const splitAt = value.lastIndexOf('.');
-  const expAt = value.indexOf('.');
-  if (expAt <= 0 || splitAt <= expAt) return false;
-
-  const tokenKind = value.slice(0, expAt);
-  const exp = value.slice(expAt + 1, splitAt);
-  const sig = value.slice(splitAt + 1);
-  if (tokenKind !== kind || !/^\d+$/.test(exp) || !sig) return false;
-  if (Number(exp) <= Date.now()) return false;
-
-  const payload = `${tokenKind}.${exp}`;
-  const expected = createHmac('sha256', UNLOCK_SECRET).update(payload).digest('base64url');
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
+export { app };
 
 function artCookieOptions(req) {
   const origin = String(req.headers.origin || '');
@@ -95,13 +80,6 @@ function artCookieOptions(req) {
   };
 }
 
-function passwordsMatch(provided, expected) {
-  const a = Buffer.from(String(provided ?? ''), 'utf8');
-  const b = Buffer.from(String(expected ?? ''), 'utf8');
-  if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 function parseCookies(req) {
   const header = String(req.headers.cookie || '');
   const cookies = {};
@@ -121,16 +99,16 @@ function parseCookies(req) {
 }
 
 function isArtEnabled(req) {
-  if (ENABLE_ART) return true;
-  return verifyUnlock(parseCookies(req)[ART_COOKIE], 'art');
+  if (artGloballyEnabled()) return true;
+  return verifyUnlock(parseCookies(req)[ART_COOKIE], 'art', artCookieSecret());
 }
 
 function isArtUploadAllowed(req) {
-  return !ENABLE_ART && isArtEnabled(req);
+  return !artGloballyEnabled() && isAdminEnabled(req);
 }
 
 function isAdminEnabled(req) {
-  return verifyUnlock(parseCookies(req)[ADMIN_COOKIE], 'admin');
+  return verifyUnlock(parseCookies(req)[ADMIN_COOKIE], 'admin', adminCookieSecret());
 }
 
 function rejectArtIfLocked(req, res) {
@@ -141,14 +119,40 @@ function rejectArtIfLocked(req, res) {
 }
 
 function rejectArtUploadIfLocked(req, res) {
-  if (isArtUploadAllowed(req)) return false;
-  res.status(403).json({ error: 'Art upload requires password unlock.' });
-  return true;
+  if (!isAdminEnabled(req)) {
+    res.status(401).json({ error: 'Admin unlock required.' });
+    return true;
+  }
+  if (artGloballyEnabled()) {
+    res.status(403).json({ error: 'Art upload is disabled while creature art is public.' });
+    return true;
+  }
+  return false;
 }
 
 function rejectAdminIfLocked(req, res) {
   if (isAdminEnabled(req)) return false;
-  res.status(403).json({ error: 'Admin password unlock required.' });
+  res.status(401).json({ error: 'Admin unlock required.' });
+  return true;
+}
+
+function rejectIfUnlockLocked(res, ip, kind, gate) {
+  if (gate.allowed) return false;
+  console.warn(`[${kind}-unlock] locked-out ip=${ip} retryAfterSec=${gate.retryAfterSec}`);
+  res.set('Retry-After', String(gate.retryAfterSec));
+  res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  return true;
+}
+
+function recordUnlockFailure(res, ip, kind, limiter) {
+  const result = limiter.fail(ip);
+  console.warn(`[${kind}-unlock] failed ip=${ip} failures=${result.failures} locked=${result.locked}`);
+  if (result.locked) {
+    res.set('Retry-After', String(result.retryAfterSec));
+    res.status(429).json({ error: 'Too many attempts. Try again later.' });
+    return true;
+  }
+  res.status(401).json({ error: 'Invalid password' });
   return true;
 }
 
@@ -524,14 +528,14 @@ async function userMonsterExists(pool, userMonsterId) {
 }
 
 function logSection(title) {
-  if (!DEBUG_SQL) return;
+  if (!debugSqlEnabled()) return;
   console.log('\n' + '='.repeat(100));
   console.log(title);
   console.log('='.repeat(100));
 }
 
 function logValue(label, value) {
-  if (!DEBUG_SQL) return;
+  if (!debugSqlEnabled()) return;
   console.log(label, value);
 }
 
@@ -943,7 +947,7 @@ function addFullTextFilter(request, where, debugParams, {
 
 app.get('/api/config', (req, res) => {
   res.json({
-    enableArt: ENABLE_ART,
+    enableArt: artGloballyEnabled(),
     artUnlocked: isArtEnabled(req),
     artUpload: isArtUploadAllowed(req),
     adminUnlocked: isAdminEnabled(req)
@@ -951,27 +955,49 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/art/unlock', (req, res) => {
-  if (ENABLE_ART) {
+  const ip = clientIp(req);
+  if (artGloballyEnabled()) {
     res.json({ ok: true, enableArt: true, artUnlocked: true });
     return;
   }
 
-  if (!passwordsMatch(req.body?.password, ENABLE_ART_PWD)) {
-    res.status(401).json({ error: 'Invalid password' });
+  if (rejectIfUnlockLocked(res, ip, 'art', artAttemptLimiter.check(ip))) return;
+
+  const expected = artPassword();
+  if (!passwordMatches(req.body?.password, expected)) {
+    recordUnlockFailure(res, ip, 'art', artAttemptLimiter);
     return;
   }
 
-  res.cookie(ART_COOKIE, signUnlock('art'), artCookieOptions(req));
+  const secret = artCookieSecret();
+  if (!secret) {
+    console.warn(`[art-unlock] rejected ip=${ip} reason=not_configured`);
+    res.status(503).json({ error: 'Art unlock is not configured.' });
+    return;
+  }
+
+  artAttemptLimiter.succeed(ip);
+  res.cookie(ART_COOKIE, signUnlock('art', secret), artCookieOptions(req));
   res.json({ ok: true, enableArt: false, artUnlocked: true });
 });
 
 app.post('/api/admin/unlock', (req, res) => {
-  if (!passwordsMatch(req.body?.password, ADMIN_PWD)) {
-    res.status(401).json({ error: 'Invalid password' });
+  const ip = clientIp(req);
+  if (rejectIfUnlockLocked(res, ip, 'admin', adminAttemptLimiter.check(ip))) return;
+
+  if (!adminUnlockConfigured()) {
+    console.warn(`[admin-unlock] rejected ip=${ip} reason=not_configured`);
+    res.status(503).json({ error: 'Admin unlock is not configured.' });
     return;
   }
 
-  res.cookie(ADMIN_COOKIE, signUnlock('admin'), artCookieOptions(req));
+  if (!passwordMatches(req.body?.password, adminUnlockSecret())) {
+    recordUnlockFailure(res, ip, 'admin', adminAttemptLimiter);
+    return;
+  }
+
+  adminAttemptLimiter.succeed(ip);
+  res.cookie(ADMIN_COOKIE, signUnlock('admin', adminCookieSecret()), artCookieOptions(req));
   res.json({ ok: true, adminUnlocked: true });
 });
 
@@ -1246,11 +1272,7 @@ app.get('/api/equipment', async (req, res) => {
       outerColumn: 'e.EquipmentId'
     });
 
-    const rawLimit = Number(req.query.limit || 100);
-    const rawOffset = Number(req.query.offset || 0);
-
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
-    const offset = Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0);
+    const { limit, offset } = parsePage(req.query);
 
     const sortBy = normalizeEquipmentSortBy(req.query.sortBy);
     const sortDir = normalizeSortDir(req.query.sortDir);
@@ -1341,11 +1363,7 @@ app.get('/api/equipment', async (req, res) => {
         e.Hardness,
         e.HardnessText,
         e.HP,
-        e.HPText,
-        e.RawHtml,
-        e.RawText,
-        e.RawMD,
-        e.RawJson
+        e.HPText
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -1363,12 +1381,6 @@ app.get('/api/equipment', async (req, res) => {
 
     const result = await request.query(query);
 
-    console.log('\nFINAL SQL');
-    console.log(query);
-
-    console.log('\nBOUND PARAMETERS');
-    console.dir(debugParams, { depth: null });
-
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
@@ -1381,7 +1393,7 @@ app.get('/api/equipment', async (req, res) => {
       total,
       limit,
       offset,
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             where,
             params: debugParams,
@@ -1397,7 +1409,7 @@ app.get('/api/equipment', async (req, res) => {
 
     res.status(500).json({
       error: getErrorMessage(err),
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             query: req.query
           }
@@ -1459,11 +1471,7 @@ app.get('/api/feats', async (req, res) => {
       outerColumn: 'f.FeatId'
     });
 
-    const rawLimit = Number(req.query.limit || 100);
-    const rawOffset = Number(req.query.offset || 0);
-
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
-    const offset = Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0);
+    const { limit, offset } = parsePage(req.query);
 
     const sortBy = normalizeFeatSortBy(req.query.sortBy);
     const sortDir = normalizeSortDir(req.query.sortDir);
@@ -1502,10 +1510,6 @@ app.get('/api/feats', async (req, res) => {
           f.IsStandardAncestryFeat,
           f.Summary,
           f.RemasterId,
-          f.RawHtml,
-          f.RawText,
-          f.RawMD,
-          f.RawJson,
           MIN(f.FeatId) OVER (
             PARTITION BY
               f.Name,
@@ -1621,11 +1625,7 @@ app.get('/api/feats', async (req, res) => {
         f.PFS,
         f.IsStandardAncestryFeat,
         f.Summary,
-        f.RemasterId,
-        f.RawHtml,
-        f.RawText,
-        f.RawMD,
-        f.RawJson
+        f.RemasterId
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -1644,12 +1644,6 @@ app.get('/api/feats', async (req, res) => {
 
     const result = await request.query(query);
 
-    console.log('\nFINAL SQL');
-    console.log(query);
-
-    console.log('\nBOUND PARAMETERS');
-    console.dir(debugParams, { depth: null });
-
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
@@ -1662,7 +1656,7 @@ app.get('/api/feats', async (req, res) => {
       total,
       limit,
       offset,
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             where,
             params: debugParams,
@@ -1678,7 +1672,7 @@ app.get('/api/feats', async (req, res) => {
 
     res.status(500).json({
       error: getErrorMessage(err),
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             query: req.query
           }
@@ -1762,11 +1756,7 @@ app.get('/api/spells', async (req, res) => {
       outerColumn: 's.SpellId'
     });
 
-    const rawLimit = Number(req.query.limit || 100);
-    const rawOffset = Number(req.query.offset || 0);
-
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
-    const offset = Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0);
+    const { limit, offset } = parsePage(req.query);
 
     const sortBy = normalizeSpellSortBy(req.query.sortBy);
     const sortDir = normalizeSortDir(req.query.sortDir);
@@ -1852,11 +1842,7 @@ app.get('/api/spells', async (req, res) => {
         s.Bloodline,
         s.DomainText,
         s.RemasterId,
-        s.RemasterName,
-        s.RawHtml,
-        s.RawText,
-        s.RawMD,
-        s.RawJson
+        s.RemasterName
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -1874,12 +1860,6 @@ app.get('/api/spells', async (req, res) => {
 
     const result = await request.query(query);
 
-    console.log('\nFINAL SQL');
-    console.log(query);
-
-    console.log('\nBOUND PARAMETERS');
-    console.dir(debugParams, { depth: null });
-
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
@@ -1892,7 +1872,7 @@ app.get('/api/spells', async (req, res) => {
       total,
       limit,
       offset,
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             where,
             params: debugParams,
@@ -1908,7 +1888,7 @@ app.get('/api/spells', async (req, res) => {
 
     res.status(500).json({
       error: getErrorMessage(err),
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             query: req.query
           }
@@ -1917,7 +1897,10 @@ app.get('/api/spells', async (req, res) => {
   }
 });
 
-function buildCreatureSourceSql() {
+function buildCreatureSourceSql({ includeRaw = true } = {}) {
+  const canonRawSql = includeRaw ? 'm.RawMD,' : '';
+  const userRawSql = includeRaw ? 'um.RawMD,' : '';
+
   return `
       SELECT
         m.MonsterId,
@@ -1959,7 +1942,7 @@ function buildCreatureSourceSql() {
         ms.Resistances,
         ms.Weaknesses,
         ms.Speed,
-        m.RawMD,
+        ${canonRawSql}
         CASE
           WHEN sb.Name = N'Alien Core'
             OR sb.Name LIKE N'Alien Core,%'
@@ -2028,7 +2011,7 @@ function buildCreatureSourceSql() {
         um.Resistances,
         um.Weaknesses,
         um.Speed,
-        um.RawMD,
+        ${userRawSql}
         um.GameSystem,
         um.ContentType,
         N'my monsters' AS SourceType,
@@ -2117,7 +2100,14 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
             WHERE CONTAINS((Name, RawText), @text)
           ))
           OR
-          (ContentType = N'user generated' AND (Name LIKE @textLike OR RawMD LIKE @textLike))
+          (ContentType = N'user generated' AND (
+            Name LIKE @textLike
+            OR UserMonsterId IN (
+              SELECT UserMonsterId
+              FROM pf2.UserMonster
+              WHERE RawMD LIKE @textLike
+            )
+          ))
         )
       `);
       debugParams.text = {
@@ -2167,11 +2157,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     addIntFilter(request, where, debugParams, 'AC', 'acMin', req.query.acMin, '>=');
     addIntFilter(request, where, debugParams, 'AC', 'acMax', req.query.acMax, '<=');
 
-    const rawLimit = Number(req.query.limit || 100);
-    const rawOffset = Number(req.query.offset || 0);
-
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
-    const offset = Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0);
+    const { limit, offset } = parsePage(req.query);
 
     const sortBy = normalizeSortBy(req.query.sortBy);
     const sortDir = normalizeSortDir(req.query.sortDir);
@@ -2191,7 +2177,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     };
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const sourceSystemSql = buildCreatureSourceSql();
+    const sourceSystemSql = buildCreatureSourceSql({ includeRaw: false });
 
     const query = `
       SELECT *
@@ -2216,17 +2202,13 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     const result = await request.query(query);
 
-    console.log('\nFINAL SQL');
-    console.log(query);
-
-    console.log('\nBOUND PARAMETERS');
-    console.dir(debugParams, { depth: null });
-
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
 
     if (isArtEnabled(req)) {
       await attachMonsterImageUrls(pool, rows);
+    } else {
+      hideArtUrls(rows);
     }
     await attachSourcePurchaseUrls(pool, rows);
 
@@ -2239,7 +2221,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       total,
       limit,
       offset,
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             where,
             params: debugParams,
@@ -2255,7 +2237,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     res.status(500).json({
       error: getErrorMessage(err),
-      debug: DEBUG_SQL
+      debug: debugSqlEnabled()
         ? {
             query: req.query
           }
@@ -2328,6 +2310,8 @@ async function fetchUserMonsterById(pool, userMonsterId) {
 }
 
 async function upsertUserMonster(req, res, { routeLabel, userMonsterIdFromRoute = null } = {}) {
+  if (rejectAdminIfLocked(req, res)) return;
+
   const started = Date.now();
 
   try {
@@ -2370,6 +2354,7 @@ app.put('/api/user-monsters', (req, res) => upsertUserMonster(req, res, {
 
 app.put('/api/user-monsters/:userMonsterId', (req, res, next) => {
   if (String(req.params.userMonsterId).toLowerCase() === 'image') return next();
+  if (rejectAdminIfLocked(req, res)) return;
   const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
   if (!userMonsterId) {
     res.status(400).json({ error: 'Invalid userMonsterId' });
@@ -2467,6 +2452,8 @@ app.delete('/api/user-monsters/:userMonsterId', async (req, res) => {
 });
 
 async function sendUserMonsterImage(req, res, { cacheControl }) {
+  if (rejectArtIfLocked(req, res)) return;
+
   const userMonsterId = Number(req.params.userMonsterId);
 
   if (!Number.isInteger(userMonsterId) || userMonsterId <= 0) {
@@ -2505,7 +2492,7 @@ async function sendUserMonsterImage(req, res, { cacheControl }) {
 }
 
 app.put('/api/user-monsters/:userMonsterId/image', async (req, res) => {
-  if (rejectArtUploadIfLocked(req, res)) return;
+  if (rejectAdminIfLocked(req, res)) return;
 
   try {
     const userMonsterId = Number(req.params.userMonsterId);
@@ -2572,6 +2559,72 @@ function presentCreature(row) {
   return { ...row, RawMD: htmlStatBlockToText(row.RawMD) };
 }
 
+function parsePositiveId(value) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
+
+async function sendTableRow(res, { id, missing, sqlText, param }) {
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input(param, sql.Int, id)
+      .query(sqlText);
+    const row = result.recordset?.[0];
+    if (!row) {
+      res.status(404).json({ error: missing });
+      return;
+    }
+    res.json(row);
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+}
+
+app.get('/api/equipment/:equipmentId', (req, res) => {
+  const equipmentId = parsePositiveId(req.params.equipmentId);
+  if (!equipmentId) {
+    res.status(400).json({ error: 'Invalid equipmentId' });
+    return;
+  }
+  return sendTableRow(res, {
+    id: equipmentId,
+    param: 'equipmentId',
+    missing: 'Equipment not found',
+    sqlText: 'SELECT * FROM pf2.Equipment WHERE EquipmentId = @equipmentId'
+  });
+});
+
+app.get('/api/feats/:featId', (req, res) => {
+  const featId = parsePositiveId(req.params.featId);
+  if (!featId) {
+    res.status(400).json({ error: 'Invalid featId' });
+    return;
+  }
+  return sendTableRow(res, {
+    id: featId,
+    param: 'featId',
+    missing: 'Feat not found',
+    sqlText: 'SELECT * FROM pf2.Feat WHERE FeatId = @featId'
+  });
+});
+
+app.get('/api/spells/:spellId', (req, res) => {
+  const spellId = parsePositiveId(req.params.spellId);
+  if (!spellId) {
+    res.status(400).json({ error: 'Invalid spellId' });
+    return;
+  }
+  return sendTableRow(res, {
+    id: spellId,
+    param: 'spellId',
+    missing: 'Spell not found',
+    sqlText: 'SELECT * FROM pf2.Spell WHERE SpellId = @spellId'
+  });
+});
+
 app.get('/api/monsters/:monsterId', async (req, res) => {
   const started = Date.now();
   const monsterId = Number(req.params.monsterId);
@@ -2594,6 +2647,8 @@ app.get('/api/monsters/:monsterId', async (req, res) => {
 
     if (isArtEnabled(req)) {
       await attachMonsterImageUrls(pool, [row]);
+    } else {
+      hideArtUrls([row]);
     }
 
     logValue('Elapsed ms:', Date.now() - started);
@@ -2778,13 +2833,20 @@ async function startServer() {
       if (imagesDir) {
         console.log(`Serving schema images from ${imagesDir}`);
       }
-      console.log(`DEBUG_SQL=${DEBUG_SQL}`);
-      console.log(`ENABLE_ART=${ENABLE_ART}`);
+      const artOn = artGloballyEnabled();
+      console.log(`DEBUG_SQL=${debugSqlEnabled()}`);
+      console.log(`ENABLE_ART=${artOn}`);
       console.log(
-        ENABLE_ART
+        artOn
           ? 'Creature art: serving'
           : 'Creature art: locked (not serving until password)'
       );
+      console.log(
+        adminUnlockConfigured()
+          ? 'Admin unlock: configured'
+          : 'Admin unlock: disabled (set ADMIN_UNLOCK_SECRET and ADMIN_COOKIE_SECRET, each at least 16 characters)'
+      );
+      console.log(`TRUST_PROXY_HOPS=${JSON.stringify(trustProxySetting())}`);
       console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);
       resolve(server);
     });
@@ -2802,7 +2864,12 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const isDirectRun = process.argv[1]
+  && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  startServer().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
