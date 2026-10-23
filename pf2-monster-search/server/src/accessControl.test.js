@@ -161,7 +161,7 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
   const artConfig = await request(port, '/api/config', { ip: '203.0.113.22', cookie: artCookie });
   assert.equal(artConfig.json.artUnlocked, true);
   assert.equal(artConfig.json.adminUnlocked, false);
-  assert.equal(artConfig.json.artUpload, false);
+  assert.equal(artConfig.json.artUpload, true);
 
   const adminAsArt = await request(port, '/api/config', {
     ip: '203.0.113.23',
@@ -188,8 +188,7 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
     ['PUT', '/api/user-monsters/1', { name: 'Probe' }],
     ['PATCH', '/api/user-monsters/1/name', { name: 'Probe' }],
     ['DELETE', '/api/user-monsters/1'],
-    ['PUT', '/api/user-monsters/1/image', { imageDataUrl: 'data:image/png;base64,AA==' }],
-    ['PUT', '/api/monsters/1/image', { imageDataUrl: 'data:image/png;base64,AA==' }]
+    ['PUT', '/api/user-monsters/1/image', { imageDataUrl: 'data:image/png;base64,AA==' }]
   ];
 
   for (const [method, path, body] of writes) {
@@ -200,6 +199,15 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
     const withArt = await request(port, path, { method, ip: '203.0.113.31', body, cookie: artCookie });
     assert.equal(withArt.response.status, 401, `${method} ${path} with the art cookie`);
   }
+
+  // Canon art: the art password may upload (fill-empty-only is enforced in src/art);
+  // anonymous callers may not. A bogus image is rejected by the file checks before any DB work.
+  const canonBody = { imageDataUrl: 'data:image/png;base64,AA==' };
+  const canonAnon = await request(port, '/api/monsters/1/image', { method: 'PUT', ip: '203.0.113.32', body: canonBody });
+  assert.equal(canonAnon.response.status, 401);
+  const canonArt = await request(port, '/api/monsters/1/image', { method: 'PUT', ip: '203.0.113.33', body: canonBody, cookie: artCookie });
+  assert.notEqual(canonArt.response.status, 401);
+  assert.notEqual(canonArt.response.status, 403);
 
   const wrong = 'not-the-admin-secret';
   for (let attempt = 1; attempt <= 5; attempt += 1) {

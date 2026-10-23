@@ -311,8 +311,15 @@ export async function getCachedMonsterThumbnail(pool, cache, monsterId) {
   return { ...entry, cacheHit: false };
 }
 
+const SAFE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
 export function sendMonsterImageResponse(res, image, { cacheControl }) {
-  res.setHeader('Content-Type', image.contentType);
+  // Never serve SVG/HTML from art storage: unknown types go out as a download.
+  const safe = SAFE_IMAGE_TYPES.has(String(image.contentType).toLowerCase());
+  res.setHeader('Content-Type', safe ? image.contentType : 'application/octet-stream');
+  if (!safe) res.setHeader('Content-Disposition', 'attachment');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
   res.setHeader('Content-Length', String(image.byteLength));
   res.setHeader('Cache-Control', cacheControl);
   res.end(image.buffer);

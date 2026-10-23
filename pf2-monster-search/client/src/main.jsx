@@ -16,6 +16,7 @@ import {
 import { utilitiesUpdatesDescription, webUpdatesDescription } from './updatesDescriptions.js';
 import { imageLibraryEntries } from './imagesLibrary.js';
 import './styles.css';
+import ArtReviewPanel from './ArtReviewPanel.jsx';
 
 
 async function copyText(value) {
@@ -826,6 +827,7 @@ function SettingsMenu() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -836,8 +838,6 @@ function SettingsMenu() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
-
-  if (!showArtUnlock && adminEnabled) return null;
 
   function openPassword(target) {
     setOpen(false);
@@ -909,6 +909,11 @@ function SettingsMenu() {
           >
             {adminEnabled ? 'Admin enabled' : 'Enable Admin (requires password)'}
           </button>
+          {adminEnabled && (
+            <button type="button" role="menuitem" onClick={() => { setOpen(false); setReviewOpen(true); }}>
+              Review uploaded art
+            </button>
+          )}
         </div>
       )}
 
@@ -932,6 +937,8 @@ function SettingsMenu() {
           </form>
         </div>
       )}
+
+      {reviewOpen && <ArtReviewPanel onClose={() => setReviewOpen(false)} />}
     </div>
   );
 }
@@ -4453,7 +4460,7 @@ function ArtUploadModal({ monsterName, onClose, onUpload }) {
   async function handleFile(file) {
     if (!file || submitting) return;
     if (!file.type.startsWith('image/')) {
-      setError('Paste or choose a PNG, JPEG, GIF, or WebP image.');
+      setError('Paste or choose a PNG, JPEG, or WebP image (max 5 MB, 4096px).');
       return;
     }
 

@@ -106,3 +106,27 @@ SELECT TOP 10 * FROM pf2.vwMonsterFull;
 ```
 
 The grid can show a lot of columns, but the default layout emphasizes common encounter-building fields first.
+
+## Art upload guardrails
+
+Code: `server/src/art/` (hooked into `server.js` in a few places). Tests: `cd server && npm test`.
+
+- **Fill empty only:** the art password can add art only to creatures with no art of their own. Replacing or removing art needs admin (`409` otherwise). Admin can remove art with `DELETE /api/admin/art/:type/:id` (`type` = `monster` or `user-monster`).
+- **Versioned password:** `ART_PASSWORDS` (see `server/.env.example`). The art cookie carries the version; removing a version from the env invalidates its cookies on restart.
+- **File checks:** PNG/JPEG/WebP only, detected by magic bytes (declared MIME and extension ignored). Max `ART_MAX_BYTES` (5 MB) and `ART_MAX_DIMENSION` (4096 px). Every upload is re-encoded with `sharp`, which strips EXIF and anything else embedded. SVG/GIF are rejected. Art responses send `X-Content-Type-Options: nosniff` and a sandbox CSP, and unknown stored types go out as `application/octet-stream`.
+- **Rate limits:** per password version (`ART_UPLOAD_RATE_PER_VERSION`/hour) and per IP (`ART_UPLOAD_RATE_PER_IP`/hour). In-memory, so they reset on restart. Admin is exempt.
+- **Audit + review queue:** every upload, removal, and revert is logged in `pf2.ArtUpload` with the target, SHA-256/size of the new art, the previous art bytes, role, password version/label, IP, user agent, and status (`pending`, `approved`, `auto_approved`, `rejected`, `rolled_back`). Pending art is hidden from viewers who aren't art or admin unlocked, until approved or `ART_AUTO_APPROVE_HOURS` passes.
+
+Admin API (admin cookie required):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/admin/art/uploads?status=pending&version=3&label=&ip=&from=&to=&suspect=true&limit=100` | List uploads. `suspect=true` = uploaded with a retired password version |
+| GET | `/api/admin/art/versions` | Active versions (labels only) + upload counts per version |
+| POST | `/api/admin/art/uploads/:id/approve` | |
+| POST | `/api/admin/art/uploads/:id/reject` | Restores the previous art (`409` if newer art exists) |
+| POST | `/api/admin/art/rollback` | Body `{ version?, label?, ip?, from?, to?, suspect?, ids?, dryRun? }`. At least one filter required. Restores previous art for every matching live upload, newest first, and skips creatures that have newer art |
+
+The client has a minimal **Settings > Review uploaded art** panel when admin is unlocked.
+
+**Migration:** `pf2.ArtUpload` is created automatically on first use (`IF OBJECT_ID ... IS NULL`). No changes to existing tables. Run `npm install` in `server/` to get `sharp`. Before deploying, set `ART_PASSWORDS` (or keep `ENABLE_ART_PWD`, which becomes v1) and a strong `ART_COOKIE_SECRET` (admin uses `ADMIN_UNLOCK_SECRET`/`ADMIN_COOKIE_SECRET`; client IP uses `TRUST_PROXY_HOPS`). Existing art cookies (old format) stop working after deploy, so partners need to re-enter the art password once.

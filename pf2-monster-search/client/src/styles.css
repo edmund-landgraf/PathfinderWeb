@@ -2120,3 +2120,10 @@ tr { cursor: pointer; }
   .monsterSummaryHeader { display: block; }
   .monsterSummarySource { display: block; margin-top: 8px; text-align: left; }
 }
+
+/* Admin art review queue */
+.artReviewPanel { width: min(760px, 94vw); max-height: 86vh; overflow: auto; }
+.artReviewToolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.artReviewList { display: grid; gap: 8px; }
+.artReviewRow { display: grid; grid-template-columns: 64px 1fr auto auto; gap: 10px; align-items: center; }
+.artReviewRow img, .artReviewNoImg { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; background: #222; display: grid; place-items: center; }

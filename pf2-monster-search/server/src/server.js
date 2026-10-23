@@ -16,6 +16,7 @@ import {
   upsertMonsterImage
 } from './monsterImages.js';
 import { freePort, isPortListening, sleep } from './freePort.mjs';
+import { createArtGuardrails } from './art/index.js';
 import { htmlStatBlockToText, looksLikeHtmlStatBlock } from '../../client/src/markdownExtract.js';
 import {
   ADMIN_COOKIE,
@@ -100,11 +101,13 @@ function parseCookies(req) {
 
 function isArtEnabled(req) {
   if (artGloballyEnabled()) return true;
-  return verifyUnlock(parseCookies(req)[ART_COOKIE], 'art', artCookieSecret());
+  return Boolean(art.getArtSession(req));
 }
 
+// Admin may always upload (official art only via this path); art-password sessions
+// may only fill EMPTY official art, and only while art is locked (enforced in src/art/).
 function isArtUploadAllowed(req) {
-  return !artGloballyEnabled() && isAdminEnabled(req);
+  return isAdminEnabled(req) || (!artGloballyEnabled() && Boolean(art.getArtSession(req)));
 }
 
 function isAdminEnabled(req) {
@@ -157,6 +160,24 @@ function recordUnlockFailure(res, ip, kind, limiter) {
 }
 
 const monsterImageCache = createMonsterImageCache();
+
+// Art guardrails (versioned art passwords, fill-empty-only, audit, review queue). See src/art/.
+const art = createArtGuardrails({
+  env: process.env,
+  sql,
+  getPool,
+  secret: artCookieSecret() || (process.env.ART_PASSWORDS ? `art-cookie-v2:${process.env.ART_PASSWORDS}` : ''),
+  ttlMs: UNLOCK_TTL_MS,
+  artCookieName: ART_COOKIE,
+  parseCookies,
+  isAdmin: (req) => isAdminEnabled(req),
+  artUploadsEnabled: !artGloballyEnabled(),
+  onImageChanged: (type, id) => {
+    if (type !== 'monster') return;
+    forgetMissingImage(id);
+    monsterImageCache.delete(id);
+  }
+});
 
 
 const allowedSortColumns = new Set([
@@ -963,21 +984,20 @@ app.post('/api/art/unlock', (req, res) => {
 
   if (rejectIfUnlockLocked(res, ip, 'art', artAttemptLimiter.check(ip))) return;
 
-  const expected = artPassword();
-  if (!passwordMatches(req.body?.password, expected)) {
-    recordUnlockFailure(res, ip, 'art', artAttemptLimiter);
-    return;
-  }
-
-  const secret = artCookieSecret();
-  if (!secret) {
+  if (!art.hasSecret()) {
     console.warn(`[art-unlock] rejected ip=${ip} reason=not_configured`);
     res.status(503).json({ error: 'Art unlock is not configured.' });
     return;
   }
 
+  const artMatch = art.matchPassword(req.body?.password);
+  if (!artMatch) {
+    recordUnlockFailure(res, ip, 'art', artAttemptLimiter);
+    return;
+  }
+
   artAttemptLimiter.succeed(ip);
-  res.cookie(ART_COOKIE, signUnlock('art', secret), artCookieOptions(req));
+  res.cookie(ART_COOKIE, art.signCookie(artMatch), artCookieOptions(req));
   res.json({ ok: true, enableArt: false, artUnlocked: true });
 });
 
@@ -2207,6 +2227,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     if (isArtEnabled(req)) {
       await attachMonsterImageUrls(pool, rows);
+      art.filterRows(req, rows);
     } else {
       hideArtUrls(rows);
     }
@@ -2460,6 +2481,12 @@ async function sendUserMonsterImage(req, res, { cacheControl }) {
     res.status(400).json({ error: 'Invalid userMonsterId' });
     return;
   }
+  if (art.hidePending(req, 'user-monster', userMonsterId)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).json({ error: 'User monster image not found' });
+    return;
+  }
+  cacheControl = art.cacheControlFor('user-monster', userMonsterId, cacheControl);
 
   try {
     const pool = await getPool();
@@ -2491,49 +2518,12 @@ async function sendUserMonsterImage(req, res, { cacheControl }) {
   }
 }
 
-app.put('/api/user-monsters/:userMonsterId/image', async (req, res) => {
+// Custom creatures are admin-only (PR #1); the upload itself still goes through the
+// art guardrails for file checks, re-encode and audit. See src/art/index.js.
+const userMonsterImageUpload = art.uploadHandler('user-monster');
+app.put('/api/user-monsters/:userMonsterId/image', (req, res) => {
   if (rejectAdminIfLocked(req, res)) return;
-
-  try {
-    const userMonsterId = Number(req.params.userMonsterId);
-    if (!Number.isInteger(userMonsterId) || userMonsterId <= 0) {
-      res.status(400).json({ error: 'Invalid user monster id' });
-      return;
-    }
-
-    const image = parseImagePayload(req.body || {});
-    if (!image.buffer) {
-      res.status(400).json({ error: 'Image is required.' });
-      return;
-    }
-
-    const pool = await getPool();
-    await ensureUserMonsterSchema(pool);
-    const result = await pool.request()
-      .input('userMonsterId', sql.Int, userMonsterId)
-      .input('image', sql.VarBinary(sql.MAX), image.buffer)
-      .input('imageContentType', sql.NVarChar(100), image.contentType)
-      .query(`
-        UPDATE pf2.UserMonster
-        SET Image = @image,
-            ImageContentType = @imageContentType,
-            UpdatedAt = SYSUTCDATETIME()
-        WHERE UserMonsterId = @userMonsterId;
-      `);
-
-    if (!result.rowsAffected?.[0]) {
-      res.status(404).json({ error: 'User monster not found' });
-      return;
-    }
-
-    res.json({
-      ok: true,
-      imageUrl: `/api/user-monsters/${userMonsterId}/image/thumb`
-    });
-  } catch (err) {
-    logError(err);
-    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
-  }
+  return userMonsterImageUpload(req, res);
 });
 
 app.get('/api/user-monsters/:userMonsterId/image/thumb', (req, res) => {
@@ -2647,6 +2637,7 @@ app.get('/api/monsters/:monsterId', async (req, res) => {
 
     if (isArtEnabled(req)) {
       await attachMonsterImageUrls(pool, [row]);
+      art.filterRows(req, [row]);
     } else {
       hideArtUrls([row]);
     }
@@ -2659,48 +2650,15 @@ app.get('/api/monsters/:monsterId', async (req, res) => {
   }
 });
 
-app.put('/api/monsters/:monsterId/image', async (req, res) => {
-  if (rejectArtUploadIfLocked(req, res)) return;
-
-  const monsterId = Number(req.params.monsterId);
-  if (!Number.isInteger(monsterId) || monsterId <= 0) {
-    res.status(400).json({ error: 'Invalid monsterId' });
+// Canon art: admin may replace; an art-password session may only fill EMPTY art (409 if art
+// exists), with file checks, rate limits, audit and review queue. See src/art/index.js.
+const monsterImageUpload = art.uploadHandler('monster');
+app.put('/api/monsters/:monsterId/image', (req, res) => {
+  if (!isArtUploadAllowed(req)) {
+    res.status(401).json({ error: 'Art or admin unlock required.' });
     return;
   }
-
-  try {
-    const image = parseImagePayload(req.body || {});
-    if (!image.buffer) {
-      res.status(400).json({ error: 'Image is required.' });
-      return;
-    }
-
-    const pool = await getPool();
-    const exists = await pool.request()
-      .input('monsterId', sql.Int, monsterId)
-      .query(`
-        SELECT MonsterId
-        FROM pf2.Monster
-        WHERE MonsterId = @monsterId
-      `);
-
-    if (!exists.recordset?.[0]) {
-      res.status(404).json({ error: 'Monster not found' });
-      return;
-    }
-
-    await upsertMonsterImage(pool, monsterId, image.buffer);
-    forgetMissingImage(monsterId);
-    monsterImageCache.delete(monsterId);
-
-    res.json({
-      ok: true,
-      imageUrl: `/api/monsters/${monsterId}/image/thumb`
-    });
-  } catch (err) {
-    logError(err);
-    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
-  }
+  return monsterImageUpload(req, res);
 });
 
 app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
@@ -2716,6 +2674,11 @@ app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
   }
 
   if (rejectArtIfLocked(req, res)) return;
+  if (art.hidePending(req, 'monster', monsterId)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).json({ error: 'Monster image not found' });
+    return;
+  }
 
   try {
     const pool = await getPool();
@@ -2727,7 +2690,7 @@ app.get('/api/monsters/:monsterId/image/thumb', async (req, res) => {
       return;
     }
 
-    sendMonsterImageResponse(res, image, { cacheControl: 'public, max-age=86400' });
+    sendMonsterImageResponse(res, image, { cacheControl: art.cacheControlFor('monster', monsterId, 'public, max-age=86400') });
     logValue('Bytes:', image.byteLength);
     logValue('Content-Type:', image.contentType);
     logValue('Cache hit:', image.cacheHit);
@@ -2751,6 +2714,11 @@ app.get('/api/monsters/:monsterId/image', async (req, res) => {
   }
 
   if (rejectArtIfLocked(req, res)) return;
+  if (art.hidePending(req, 'monster', monsterId)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).json({ error: 'Monster image not found' });
+    return;
+  }
 
   try {
     const pool = await getPool();
@@ -2771,6 +2739,8 @@ app.get('/api/monsters/:monsterId/image', async (req, res) => {
     res.status(500).json({ error: getErrorMessage(err) });
   }
 });
+
+art.registerRoutes(app);
 
 const sourceSchemasDir = join(rootDir, 'schemas');
 const builtSchemasDir = join(clientDistDir, 'schemas');
