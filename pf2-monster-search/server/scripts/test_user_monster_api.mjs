@@ -6,10 +6,16 @@ const stamp = Date.now();
 const createdName = `UnitTest Custom Monster ${stamp}`;
 const updatedName = `${createdName} Updated`;
 
-async function requestJson(method, path, { body, expectJson = true } = {}) {
+let adminCookie = '';
+
+async function requestJson(method, path, { body, expectJson = true, cookie = adminCookie } = {}) {
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (cookie) headers.Cookie = cookie;
+
   const response = await fetch(new URL(path, API_BASE), {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body)
   });
 
@@ -28,7 +34,30 @@ test('GET /api/health is reachable', async () => {
   assert.ok(json);
 });
 
+async function unlockAdmin() {
+  const password = process.env.ADMIN_UNLOCK_SECRET;
+  assert.ok(password, 'Set ADMIN_UNLOCK_SECRET to the value configured on the server.');
+  const unlocked = await requestJson('POST', '/api/admin/unlock', {
+    body: { password },
+    cookie: ''
+  });
+  assert.equal(unlocked.response.status, 200, unlocked.json?.error || unlocked.text);
+  const setCookie = unlocked.response.headers.getSetCookie?.() || [];
+  adminCookie = (setCookie.find((line) => line.startsWith('pf2_admin=')) || '').split(';')[0];
+  assert.ok(adminCookie, 'Admin unlock did not set pf2_admin.');
+}
+
+test('custom creature writes require the admin cookie', async () => {
+  const { response, json } = await requestJson('POST', '/api/user-monsters', {
+    body: { name: 'Anonymous' },
+    cookie: ''
+  });
+  assert.equal(response.status, 401);
+  assert.match(String(json?.error || ''), /admin/i);
+});
+
 test('POST /api/user-monsters rejects a missing name', async () => {
+  await unlockAdmin();
   const { response, json } = await requestJson('POST', '/api/user-monsters', {
     body: { level: 1 }
   });
@@ -37,11 +66,15 @@ test('POST /api/user-monsters rejects a missing name', async () => {
 });
 
 test('custom monster upsert and delete round trip', async (t) => {
+  await unlockAdmin();
   let userMonsterId;
 
   t.after(async () => {
     if (!userMonsterId) return;
-    await fetch(new URL(`/api/user-monsters/${userMonsterId}`, API_BASE), { method: 'DELETE' });
+    await fetch(new URL(`/api/user-monsters/${userMonsterId}`, API_BASE), {
+      method: 'DELETE',
+      headers: adminCookie ? { Cookie: adminCookie } : undefined
+    });
   });
 
   const created = await requestJson('POST', '/api/user-monsters', {
@@ -116,6 +149,7 @@ test('custom monster upsert and delete round trip', async (t) => {
 });
 
 test('PUT and DELETE reject invalid ids', async () => {
+  await unlockAdmin();
   const put = await requestJson('PUT', '/api/user-monsters/not-an-id', {
     body: { name: 'Invalid Id' }
   });

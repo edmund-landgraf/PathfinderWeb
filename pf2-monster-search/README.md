@@ -18,6 +18,13 @@ server/.env.example server/.env
 
 Edit `server/.env` for your SQL Server instance/database.
 
+Art visibility and admin edits use different secrets:
+
+- `ENABLE_ART` / `ENABLE_ART_PWD` — easy shared password that only shows creature art. Failures are rate-limited lightly (30 failures, then 2 minutes per IP).
+- `ADMIN_UNLOCK_SECRET` and `ADMIN_COOKIE_SECRET` — two different server-side secrets, each at least 16 characters. Admin unlock compares a SHA-256 digest in constant time and fails closed when either value is unset or too short. Five wrong attempts lock that IP out for 15 minutes. The admin cookie is signed with `ADMIN_COOKIE_SECRET` and is the only cookie that can create, edit, rename, delete, or upload custom creatures. The art cookie cannot grant admin.
+- `TRUST_PROXY_HOPS` — set to `1` behind nginx so lockouts use the client IP.
+- `DEBUG_SQL` — leave unset. Set to `true` only on a dev box to include SQL debug in API responses.
+
 Default assumes:
 
 - SQL Server on `localhost`
@@ -85,6 +92,10 @@ Search:
 ```text
 GET /api/monsters?name=dragon&levelMin=1&levelMax=10&rarity=common
 ```
+
+Search routes accept `limit` (default 100, maximum 500) and `offset`. List rows omit `RawHtml`, `RawText`, `RawMD`, and `RawJson`. Load one full record from `GET /api/monsters/:monsterId`, `GET /api/spells/:spellId`, `GET /api/feats/:featId`, or `GET /api/equipment/:equipmentId`.
+
+Custom-creature writes require the admin cookie (`POST /api/admin/unlock`). Without it those routes return `401`.
 
 ## Notes
 

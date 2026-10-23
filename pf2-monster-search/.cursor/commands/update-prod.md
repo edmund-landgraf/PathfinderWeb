@@ -27,3 +27,5 @@ curl -sS http://127.0.0.1:3333/api/health
 ```
 
 Do not change `server/.env` unless they asked. Keep `ENABLE_ART` as already set on prod.
+
+Before the first restart of the admin-unlock change, `server/.env` on the VPS must set `ADMIN_UNLOCK_SECRET` and `ADMIN_COOKIE_SECRET` (two different values, each at least 16 characters). If either is missing, `/api/admin/unlock` returns 503 and custom-creature edits stay locked. Do not put those values in git. `ENABLE_ART_PWD` stays the easy art password. Leave `DEBUG_SQL` unset. `TRUST_PROXY_HOPS=1` matches the nginx hop.

@@ -5,10 +5,13 @@ info:
   license:
     name: Proprietary
   description: |
-    Read-only JSON API for searching Pathfinder 2e creatures, NPCs, spells, feats, and equipment
+    JSON API for searching Pathfinder 2e creatures, NPCs, spells, feats, and equipment
     from a SQL Server database (Archives of Nethys data).
 
-    All search endpoints return paginated result envelopes. Lookup endpoints return filter dropdown values.
+    Search endpoints return paginated envelopes (`limit` default 100, max 500). List rows omit
+    RawHtml, RawText, RawMD, and RawJson; load a single record for the stat block.
+    SQL debug is included only when the server env var DEBUG_SQL is exactly true (default off).
+    Custom-creature writes require the pf2_admin cookie from POST /api/admin/unlock.
 
     **Base URL:** In production, the UI and API both run on port `3333` (`PORT` env var).
     In development, the Vite client on port `5173` proxies `/api` and `/schemas` to Express.
@@ -768,7 +771,7 @@ components:
           properties:
             debug:
               type: object
-              description: Present when DEBUG_SQL environment variable is true
+              description: Present only when DEBUG_SQL=true. Omitted by default.
               additionalProperties: true
 
     LookupItem:
@@ -862,7 +865,7 @@ components:
 
     SearchDebug:
       type: object
-      description: SQL debug metadata (included when DEBUG_SQL=true)
+      description: SQL debug metadata. Omitted unless DEBUG_SQL=true. Default is off.
       properties:
         where:
           type: array

@@ -12,8 +12,8 @@ The machine-readable specification lives in [`openapi.yaml`](./openapi.yaml) (Op
 | Base URL (development) | `http://localhost:5173` — Vite proxies `/api` and `/schemas` to Express |
 | Default port | `3333` (`PORT` env var) |
 | Content type | `application/json` |
-| Methods | `GET` only |
-| Authentication | None |
+| Methods | `GET` for search; `POST` for unlocks; admin cookie for custom-creature writes |
+| Authentication | Art cookie shows creature art. Admin cookie is required for custom-creature writes. |
 
 All endpoints are prefixed with `/api`.
 
@@ -34,11 +34,11 @@ Search endpoints (`/api/monsters`, `/api/npcs`, `/api/spells`, `/api/feats`, `/a
 }
 ```
 
-- `rows` — matching records for the current page
+- `rows` — matching records for the current page. List rows omit `RawHtml`, `RawText`, `RawMD`, and `RawJson`. Fetch one record for those fields (`GET /api/monsters/:monsterId`, `GET /api/spells/:spellId`, `GET /api/feats/:featId`, `GET /api/equipment/:equipmentId`).
 - `total` — total matches before pagination
 - `limit` — page size (default `100`, max `500`)
 - `offset` — rows skipped (default `0`)
-- `debug` — optional SQL debug object when `DEBUG_SQL=true`
+- `debug` — SQL `where`, bound params, and `orderBySql`. Omitted unless `DEBUG_SQL=true`. The default is off.
 
 ### Filter conventions
 
@@ -466,16 +466,27 @@ Lookup endpoints return HTTP 500 with:
 { "error": "Error message" }
 ```
 
-Search endpoints return HTTP 500 with:
+Search endpoints return HTTP 500 with `{ "error": "Error message" }`.
 
-```json
-{
-  "error": "Error message",
-  "debug": { "query": { "name": "dragon" } }
-}
-```
+A `debug` object is added only when `DEBUG_SQL=true`. Leave that variable unset on any shared or public server.
 
-The `debug` field is present only when `DEBUG_SQL=true`.
+### Unlock and custom creatures
+
+`POST /api/art/unlock` with `{ "password" }` sets the `pf2_art` cookie when `ENABLE_ART=false` and `ENABLE_ART_PWD` matches. That cookie only reveals art.
+
+`POST /api/admin/unlock` sets the `pf2_admin` cookie. The password is `ADMIN_UNLOCK_SECRET` and the cookie is signed with `ADMIN_COOKIE_SECRET`. Both must be set and at least 16 characters; otherwise the route returns `503`. Five failed attempts from one IP return `429` for 15 minutes (`TRUST_PROXY_HOPS` controls which address is counted behind nginx).
+
+These writes return `401` without a valid admin cookie:
+
+- `POST /api/user-monsters`
+- `PUT /api/user-monsters`
+- `PUT /api/user-monsters/:userMonsterId`
+- `PATCH /api/user-monsters/:userMonsterId/name`
+- `DELETE /api/user-monsters/:userMonsterId`
+- `PUT /api/user-monsters/:userMonsterId/image`
+- `PUT /api/monsters/:monsterId/image` (also `403` while `ENABLE_ART=true`)
+
+Lookup routes (`/api/lookups`, `/api/spell-lookups`, `/api/feat-lookups`, `/api/equipment-lookups`) return id/name lists for the filter dropdowns. They do not include a SQL debug object.
 
 ---
 
