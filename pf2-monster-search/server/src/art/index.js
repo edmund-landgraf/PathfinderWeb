@@ -26,6 +26,7 @@ export function createArtGuardrails(opts) {
   const labelOf = new Map(passwords.map((p) => [p.version, p.label]));
   const cfg = {
     maxBytes: num(env.ART_MAX_BYTES, 5 * 1024 * 1024),
+    intakeBytes: num(env.ART_INTAKE_BYTES, 40 * 1024 * 1024),
     maxDimension: num(env.ART_MAX_DIMENSION, 4096),
     autoApproveMs: num(env.ART_AUTO_APPROVE_HOURS, 24) * 3600 * 1000, // 0 = never auto-approve
     reviewQueue: String(env.ART_REVIEW_QUEUE ?? 'true').toLowerCase() !== 'false'
@@ -114,7 +115,7 @@ export function createArtGuardrails(opts) {
 
       let image;
       try {
-        image = await sanitizeImage(decodeUploadBody(req.body || {}, cfg.maxBytes), cfg);
+        image = await sanitizeImage(decodeUploadBody(req.body || {}, cfg.intakeBytes), cfg);
       } catch (err) {
         return httpError(res, err, 400);
       }

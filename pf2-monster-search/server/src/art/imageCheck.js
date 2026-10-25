@@ -29,13 +29,28 @@ export function decodeUploadBody(body, maxBytes) {
   return buf;
 }
 
-// Validates and re-encodes (drops EXIF/ICC/XMP and anything appended to the file).
-export async function sanitizeImage(buf, { maxBytes, maxDimension }) {
-  if (buf.length > maxBytes) throw fail('Image too large.', 413);
+const INPUT_MAX_EDGE = 16000;
+
+async function renderImage(buf, opts, { edge, format, quality }) {
+  let pipeline = sharp(buf, opts).rotate();
+  if (edge) {
+    pipeline = pipeline.resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true });
+  }
+  if (format === 'png') pipeline = pipeline.png({ compressionLevel: 9 });
+  else if (format === 'jpeg') pipeline = pipeline.jpeg({ quality, mozjpeg: true });
+  else pipeline = pipeline.webp({ quality });
+  return pipeline.toBuffer({ resolveWithObject: true });
+}
+
+// Accepts a large original, then resizes and re-encodes until it fits maxBytes.
+// Drops EXIF/ICC/XMP and anything appended to the file.
+export async function sanitizeImage(buf, { maxBytes, maxDimension, intakeBytes }) {
+  const intake = intakeBytes || Math.max(maxBytes, 40 * 1024 * 1024);
+  if (buf.length > intake) throw fail('Image is too large to accept.', 413);
   const type = sniffImageType(buf);
   if (!type) throw fail('Image must be PNG, JPEG, or WebP (SVG and GIF are not accepted).', 415);
 
-  const opts = { failOn: 'error', limitInputPixels: maxDimension * maxDimension };
+  const opts = { failOn: 'error', limitInputPixels: INPUT_MAX_EDGE * INPUT_MAX_EDGE };
   let meta;
   try {
     meta = await sharp(buf, opts).metadata();
@@ -44,20 +59,39 @@ export async function sanitizeImage(buf, { maxBytes, maxDimension }) {
   }
   const fmt = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' }[meta.format];
   if (fmt !== type) throw fail('Image content does not match its format.', 415);
-  if (!meta.width || !meta.height || meta.width > maxDimension || meta.height > maxDimension) {
-    throw fail(`Image dimensions must be at most ${maxDimension}x${maxDimension}px.`, 413);
+  if (!meta.width || !meta.height) throw fail('Image could not be decoded.', 415);
+  if (meta.width > INPUT_MAX_EDGE || meta.height > INPUT_MAX_EDGE) {
+    throw fail(`Image dimensions must be at most ${INPUT_MAX_EDGE}px on a side.`, 413);
   }
 
-  let pipeline = sharp(buf, opts).rotate(); // apply EXIF orientation, then metadata is dropped
-  if (type === 'image/png') pipeline = pipeline.png({ compressionLevel: 9 });
-  else if (type === 'image/jpeg') pipeline = pipeline.jpeg({ quality: 88, mozjpeg: true });
-  else pipeline = pipeline.webp({ quality: 88 });
-
+  const native = { png: 'png', jpeg: 'jpeg', webp: 'webp' }[meta.format];
+  const longest = Math.max(meta.width, meta.height);
+  const fitEdge = Math.min(maxDimension, longest);
   let out;
   try {
-    out = await pipeline.toBuffer({ resolveWithObject: true });
+    out = await renderImage(buf, opts, { edge: fitEdge, format: native, quality: 88 });
   } catch {
     throw fail('Image could not be re-encoded.', 415);
   }
-  return { buffer: out.data, contentType: type, width: out.info.width, height: out.info.height };
+  if (out.data.length <= maxBytes) {
+    return { buffer: out.data, contentType: type, width: out.info.width, height: out.info.height };
+  }
+
+  const edges = [...new Set([fitEdge, 2048, 1600, 1200, 800].filter((edge) => edge <= fitEdge && edge > 0))];
+  try {
+    for (const edge of edges) {
+      for (const format of ['webp', 'jpeg']) {
+        for (const quality of [82, 70, 58, 45]) {
+          out = await renderImage(buf, opts, { edge, format, quality });
+          if (out.data.length <= maxBytes) {
+            const contentType = format === 'jpeg' ? 'image/jpeg' : 'image/webp';
+            return { buffer: out.data, contentType, width: out.info.width, height: out.info.height };
+          }
+        }
+      }
+    }
+  } catch {
+    throw fail('Image could not be re-encoded.', 415);
+  }
+  throw fail('Image could not be compressed under the size limit.', 413);
 }

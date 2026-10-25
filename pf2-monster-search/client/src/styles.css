@@ -59,6 +59,7 @@ p { margin: 4px 0 0; }
 .panelTitle { display: flex; align-items: center; gap: 8px; font-weight: 800; margin-bottom: 12px; }
 .fieldGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .field { display: flex; flex-direction: column; gap: 4px; color: #e9dfd4; font-size: 12px; font-weight: 700; }
+.field input[type="checkbox"] { width: 18px; height: 18px; padding: 0; align-self: flex-start; accent-color: #c78d4c; }
 input, select, textarea {
   width: 100%;
   border: 1px solid rgba(255,255,255,.16);

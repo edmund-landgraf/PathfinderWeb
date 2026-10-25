@@ -121,6 +121,10 @@ async function readApiError(res) {
     if (data.error) return JSON.stringify(data.error);
     return text;
   } catch {
+    if (res.status === 413 || /entity too large/i.test(text)) {
+      return 'Image is too large to accept. Try a smaller file.';
+    }
+    if (/^\s*</.test(text)) return `Request failed (${res.status})`;
     return text;
   }
 }
@@ -240,6 +244,7 @@ const emptyFilters = {
   acMin: '',
   acMax: '',
   isUnique: '',
+  missingArt: '',
   nameStartsWith: '',
   contentType: '',
   limit: '100'
@@ -2382,6 +2387,46 @@ function fileToDataUrl(file) {
   });
 }
 
+// Server accepts 5 MB / 4096px. Base64 in JSON is ~4/3 the file, and Express
+// rejects the body (HTML 413) before that check. Shrink first so the upload fits.
+const ART_UPLOAD_MAX_EDGE = 2048;
+const ART_UPLOAD_MAX_DATA_URL = 6 * 1024 * 1024;
+
+function canvasToDataUrl(canvas, type, quality) {
+  const url = canvas.toDataURL(type, quality);
+  return url.startsWith(`data:${type}`) ? url : '';
+}
+
+async function fileToArtDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    let width = bitmap.width;
+    let height = bitmap.height;
+    let dataUrl = '';
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const scale = Math.min(1, ART_UPLOAD_MAX_EDGE / Math.max(width, height));
+      const w = Math.max(1, Math.round(width * scale));
+      const h = Math.max(1, Math.round(height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not prepare the image.');
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      for (const quality of [0.9, 0.8, 0.68, 0.55]) {
+        dataUrl = canvasToDataUrl(canvas, 'image/webp', quality)
+          || canvasToDataUrl(canvas, 'image/jpeg', quality);
+        if (dataUrl && dataUrl.length <= ART_UPLOAD_MAX_DATA_URL) return dataUrl;
+      }
+      width = Math.round(w * 0.7);
+      height = Math.round(h * 0.7);
+    }
+    throw new Error('Image is still too large after resizing. Use a smaller file.');
+  } finally {
+    bitmap.close?.();
+  }
+}
+
 function cacheBustImageUrl(url) {
   if (!url) return '';
   const separator = url.includes('?') ? '&' : '?';
@@ -2883,6 +2928,13 @@ function CreatureSearchPage({
 
             <Field label="Unique"><BoolSelect value={filters.isUnique} onChange={v => setFilter('isUnique', v)} /></Field>
             <Field label="Limit"><TextInput value={filters.limit} onChange={v => setFilter('limit', v)} /></Field>
+            <Field label="Missing art">
+              <input
+                type="checkbox"
+                checked={filters.missingArt === '1'}
+                onChange={e => setFilter('missingArt', e.target.checked ? '1' : '')}
+              />
+            </Field>
           </div>
 
           <div className="actions">
@@ -4467,7 +4519,7 @@ function ArtUploadModal({ monsterName, onClose, onUpload }) {
     setSubmitting(true);
     setError('');
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await fileToArtDataUrl(file);
       setPreviewUrl(dataUrl);
       await onUpload(dataUrl);
     } catch (err) {

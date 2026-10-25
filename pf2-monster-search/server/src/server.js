@@ -52,7 +52,9 @@ const clientDistDir = join(rootDir, 'client', 'dist');
 
 app.set('trust proxy', trustProxySetting());
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '15mb' }));
+// Art uploads are base64 JSON. Demiplane pastes are often uncompressed bitmaps
+// of a ~1200×2000 illustration, which blow past a small JSON cap before Sharp runs.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '64mb' }));
 
 export { app };
 
@@ -905,6 +907,39 @@ function addIntFilter(request, where, debugParams, column, paramName, value, ope
     value: n,
     column,
     operator
+  };
+}
+
+function isMissingArtQuery(value) {
+  const normalized = String(value ?? '').toLowerCase();
+  return normalized === 'true' || normalized === '1';
+}
+
+function addMissingArtFilter(where, debugParams, value) {
+  if (value === undefined || value === null || value === '') return;
+
+  const normalized = String(value).toLowerCase();
+  if (!['true', '1'].includes(normalized)) {
+    debugParams.missingArt = {
+      skipped: true,
+      reason: 'not enabled',
+      value
+    };
+    return;
+  }
+
+  where.push(`(
+    (ContentType = N'canon' AND NOT EXISTS (
+      SELECT 1
+      FROM pf2.vwMonsterImagePresent img
+      WHERE img.MonsterID = creatures.MonsterId
+    ))
+    OR (ContentType = N'user generated' AND ImageUrl IS NULL)
+  )`);
+  debugParams.missingArt = {
+    type: 'exists',
+    value: true,
+    column: 'vwMonsterImagePresent / UserMonster.Image'
   };
 }
 
@@ -2171,6 +2206,7 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       }
     }
     addBoolFilter(request, where, debugParams, 'IsUnique', 'isUnique', req.query.isUnique);
+    addMissingArtFilter(where, debugParams, req.query.missingArt);
 
     addIntFilter(request, where, debugParams, 'HP', 'hpMin', req.query.hpMin, '>=');
     addIntFilter(request, where, debugParams, 'HP', 'hpMax', req.query.hpMax, '<=');
@@ -2178,13 +2214,16 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     addIntFilter(request, where, debugParams, 'AC', 'acMax', req.query.acMax, '<=');
 
     const { limit, offset } = parsePage(req.query);
+    const missingArt = isMissingArtQuery(req.query.missingArt);
 
     const sortBy = normalizeSortBy(req.query.sortBy);
     const sortDir = normalizeSortDir(req.query.sortDir);
     const orderBySql = buildOrderBy(sortBy, sortDir);
 
-    request.input('limit', sql.Int, limit);
-    request.input('offset', sql.Int, offset);
+    if (!missingArt) {
+      request.input('limit', sql.Int, limit);
+      request.input('offset', sql.Int, offset);
+    }
 
     debugParams.limit = {
       type: 'Int',
@@ -2199,7 +2238,16 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const sourceSystemSql = buildCreatureSourceSql({ includeRaw: false });
 
-    const query = `
+    const query = missingArt
+      ? `
+      SELECT *
+      FROM (
+        ${sourceSystemSql}
+      ) creatures
+      ${whereSql}
+      ORDER BY ${orderBySql};
+    `
+      : `
       SELECT *
       FROM (
         ${sourceSystemSql}
@@ -2222,11 +2270,20 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
 
     const result = await request.query(query);
 
-    const rows = result.recordsets?.[0] || [];
-    const total = result.recordsets?.[1]?.[0]?.Total || 0;
+    let rows = result.recordsets?.[0] || [];
+    let total = result.recordsets?.[1]?.[0]?.Total || 0;
+
+    if (missingArt) {
+      // Own-image rows are already excluded in SQL. Drop creatures that still
+      // display a related creature's art, then page the remainder.
+      await attachMonsterImageUrls(pool, rows);
+      rows = rows.filter((row) => !row.ImageUrl);
+      total = rows.length;
+      rows = rows.slice(offset, offset + limit);
+    }
 
     if (isArtEnabled(req)) {
-      await attachMonsterImageUrls(pool, rows);
+      if (!missingArt) await attachMonsterImageUrls(pool, rows);
       art.filterRows(req, rows);
     } else {
       hideArtUrls(rows);
@@ -2779,6 +2836,24 @@ if (existsSync(clientDistDir)) {
     });
   });
 }
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  const tooLarge = err?.type === 'entity.too.large' || err?.status === 413 || err?.statusCode === 413;
+  if (tooLarge) {
+    res.status(413).json({ error: 'Image is too large to accept. Try a smaller file.' });
+    return;
+  }
+  if (String(req.path || '').startsWith('/api/')) {
+    console.error(err);
+    res.status(Number(err.status || err.statusCode) || 500).json({ error: 'Server error' });
+    return;
+  }
+  next(err);
+});
 
 async function startServer() {
   const isDev = process.env.NODE_ENV !== 'production';

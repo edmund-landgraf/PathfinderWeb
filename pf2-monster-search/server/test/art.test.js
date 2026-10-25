@@ -64,9 +64,20 @@ test('rejects SVG, GIF, HTML, junk after PNG header, oversize dims and bytes', a
   const fake = Buffer.concat([(await png()).subarray(0, 8), Buffer.alloc(64, 1)]);
   await assert.rejects(sanitizeImage(fake, LIMITS), /decoded|re-encoded/);
   const big = await sharp({ create: { width: 50, height: 10, channels: 3, background: '#000' } }).png().toBuffer();
-  await assert.rejects(sanitizeImage(big, { maxBytes: LIMITS.maxBytes, maxDimension: 40 }), /dimensions/);
+  const fitted = await sanitizeImage(big, { maxBytes: LIMITS.maxBytes, maxDimension: 40 });
+  assert.equal(fitted.width, 40);
+  assert.ok(fitted.height <= 40);
   assert.throws(() => decodeUploadBody({ imageBase64: Buffer.alloc(2000).toString('base64') }, 1000), /at most/);
   assert.throws(() => decodeUploadBody({}, 1000), /required/);
+});
+
+test('compresses a bulky image under maxBytes', async () => {
+  const raw = Buffer.alloc(480 * 480 * 3);
+  for (let i = 0; i < raw.length; i += 1) raw[i] = (i * 17) & 255;
+  const noisy = await sharp(raw, { raw: { width: 480, height: 480, channels: 3 } }).png().toBuffer();
+  const out = await sanitizeImage(noisy, { maxBytes: 20 * 1024, maxDimension: 4096, intakeBytes: 8 * 1024 * 1024 });
+  assert.ok(out.buffer.length <= 20 * 1024);
+  assert.ok(out.width <= 480 && out.height <= 480);
 });
 
 test('decodeUploadBody ignores declared MIME', async () => {
