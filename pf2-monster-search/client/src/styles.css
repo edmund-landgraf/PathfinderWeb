@@ -757,6 +757,29 @@ tr { cursor: pointer; }
   cursor: zoom-in;
 }
 
+.modal-art-frame {
+  position: relative;
+  width: 190px;
+}
+
+.modal-replace-art {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(245,210,170,.5);
+  border-radius: 8px;
+  background: rgba(16,12,10,.82);
+  color: #f5d2aa;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
 .modal-no-art {
   display: grid;
   place-items: center;
@@ -2092,7 +2115,8 @@ tr { cursor: pointer; }
   .modal-top-row { grid-template-columns: 1fr; }
   .modal-header { grid-template-columns: 1fr; }
   .modal-description-panel { padding-left: 0; border-left: 0; }
-  .modal-image, .modal-no-art { width: 100%; height: 260px; }
+  .modal-art-frame, .modal-image, .modal-no-art { width: 100%; height: 260px; }
+  .modal-art-frame .modal-image { height: 260px; }
   .modal-stat-grid { grid-template-columns: repeat(2, minmax(90px, 1fr)); }
   .userMonsterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .modal-field-grid { grid-template-columns: 1fr; }

@@ -4368,23 +4368,38 @@ function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, 
 
   if (src && !failed) {
     return (
-      <img
-        className="modal-image modal-image-clickable"
-        src={src}
-        alt={alt}
-        title="Double-click to view full size"
-        onError={() => {
-          if (fallbackUrl && src !== fallbackUrl) {
-            setSrc(fallbackUrl);
-            return;
-          }
-          setFailed(true);
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onImageOpen();
-        }}
-      />
+      <div className="modal-art-frame">
+        <img
+          className="modal-image modal-image-clickable"
+          src={src}
+          alt={alt}
+          title="Double-click to view full size"
+          onError={() => {
+            if (fallbackUrl && src !== fallbackUrl) {
+              setSrc(fallbackUrl);
+              return;
+            }
+            setFailed(true);
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onImageOpen();
+          }}
+        />
+        {canUpload && onEmptyClick && (
+          <button
+            type="button"
+            className="modal-replace-art"
+            title="Replace art"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEmptyClick();
+            }}
+          >
+            Replace art
+          </button>
+        )}
+      </div>
     );
   }
 
@@ -4501,7 +4516,7 @@ function ModalPopouts({
   );
 }
 
-function ArtUploadModal({ monsterName, onClose, onUpload }) {
+function ArtUploadModal({ monsterName, onClose, onUpload, replacing = false }) {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -4552,7 +4567,7 @@ function ArtUploadModal({ monsterName, onClose, onUpload }) {
       <div className="art-upload-modal" onClick={(e) => e.stopPropagation()}>
         <div className="userMonsterModalHeader">
           <div>
-            <h2>Upload art</h2>
+            <h2>{replacing ? 'Replace art' : 'Upload art'}</h2>
             <p>{monsterName}</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} disabled={submitting}>×</button>
@@ -4609,7 +4624,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
   const modalRef = useRef(null);
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
-  const { artEnabled, artCanUpload } = useArt();
+  const { artEnabled, adminEnabled } = useArt();
   const imageUrl = artEnabled ? getMonsterImageUrl(monster, 'full') : '';
   const fallbackImageUrl = artEnabled && monster.ImageUrl && monster.ImageUrl !== imageUrl
     ? monster.ImageUrl
@@ -4673,7 +4688,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
               alt={monster.Name}
               fallbackIcon={<ImageIcon />}
               onImageOpen={() => setIsImagePopoutOpen(true)}
-              canUpload={artCanUpload}
+              canUpload={adminEnabled}
               onEmptyClick={() => setIsArtUploadOpen(true)}
             />
 
@@ -4753,6 +4768,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
         {isArtUploadOpen && (
           <ArtUploadModal
             monsterName={monster.Name}
+            replacing={Boolean(imageUrl)}
             onClose={() => setIsArtUploadOpen(false)}
             onUpload={uploadMonsterArt}
           />

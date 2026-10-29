@@ -1,8 +1,64 @@
 {
-  "generatedAt": "2026-09-16T16:44:49.144Z",
+  "generatedAt": "2026-10-29T05:59:39.701Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-10-28",
+        "comment": "Stop locking out art and admin unlock after failed attempts so a correct password still succeeds."
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "Add Demiplane NPC review scripts so incomplete and named stat blocks can be audited offline."
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "Shrink oversized art uploads before storage and let search filter creatures that still have no art."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Harden art and admin unlocks and shrink public list payloads."
+      },
+      {
+        "date": "2026-10-22",
+        "comment": "Add art upload guardrails: versioned art passwords, fill-empty-only, sharp re-encode, rate limits, audit log, review queue and rollback"
+      },
+      {
+        "date": "2026-10-22",
+        "comment": "Merge PR #1: harden pf2 API"
+      },
+      {
+        "date": "2026-10-19",
+        "comment": "Persist art and admin unlock cookies across server restarts with signed tokens."
+      },
+      {
+        "date": "2026-10-18",
+        "comment": "Keep creature search filters in the URL, refresh art without a full reload, and add admin rename for custom monsters."
+      },
+      {
+        "date": "2026-10-17",
+        "comment": "Fix art unlock cookies on localhost so the browser keeps them."
+      },
+      {
+        "date": "2026-10-12",
+        "comment": "Convert Demiplane HTML stat blocks to markdown on creature reads and add a monster stat card."
+      },
+      {
+        "date": "2026-10-12",
+        "comment": "Update swagger-ui-react so its peer range includes React 19 and pick up the non-breaking audit fixes."
+      },
+      {
+        "date": "2026-10-06",
+        "comment": "Add Cursor workflows for production updates and source purchase IDs."
+      },
+      {
+        "date": "2026-09-24",
+        "comment": "Add a right-click menu to copy search-row links and IDs."
+      },
+      {
+        "date": "2026-09-16",
+        "comment": "Add admin delete for custom monsters"
+      },
       {
         "date": "2026-09-13",
         "comment": "Add a Demiplane RawMD repair script that copies imported RawHtml into empty RawMD using SQL login for Docker SQL Server."
@@ -144,6 +200,154 @@
   "utilities": {
     "title": "Pathfinder Utilities",
     "entries": [
+      {
+        "date": "2026-10-26",
+        "comment": "Allow shrinking monster images without saving a local copy."
+      },
+      {
+        "date": "2026-10-26",
+        "comment": "Back up and shrink monster images larger than 4 MB."
+      },
+      {
+        "date": "2026-10-26",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "Add source update report and local scraper outputs"
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "EOF"
+      },
+      {
+        "date": "2026-10-25",
+        "comment": "Save AoN errata, missing monster art, and missing 1e beast reports."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Add RawJson backfill scripts for empty equipment, feat, spell, and monster fields."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Also skip the warden placeholder and repair truncated or double-encoded CDN paths."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Commit RawJson backfills in chunks and use SQL login for Docker."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Default SQL auth to the Docker sa password off Windows."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Fall back to thumbnail art when Demiplane full images fail to download."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Fix source-count SQL and use Bing for creature image preview."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "Repair broken Demiplane art URLs before import."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "RowCount is reserved in SQL Server, and Google image search was blocked without a Custom Search key."
+      },
+      {
+        "date": "2026-10-23",
+        "comment": "SQL Server in Docker does not support Trusted_Connection, so non-Windows scripts need a password when MSSQL_PASSWORD is unset."
+      },
+      {
+        "date": "2026-10-20",
+        "comment": "Add PF2 equipment, feat, and spell AoN update scripts."
+      },
+      {
+        "date": "2026-10-20",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-10",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-10",
+        "comment": "Save chosen creature art locally and review candidates in a grid."
+      },
+      {
+        "date": "2026-10-10",
+        "comment": "The review page shows the stat block and source link, stores the full image on this server, and keeps the original address as metadata."
+      },
+      {
+        "date": "2026-10-09",
+        "comment": "Add AoN gap-fill scripts and a browser review for creature art."
+      },
+      {
+        "date": "2026-10-09",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-09",
+        "comment": "Empty AoN stat blocks can be refreshed, missing creatures can be inserted, and image choices are saved only after a manual OK."
+      },
+      {
+        "date": "2026-10-09",
+        "comment": "Use Windows trusted connection locally and SQL login elsewhere."
+      },
+      {
+        "date": "2026-10-07",
+        "comment": "Add Adventure source-group fallback importer"
+      },
+      {
+        "date": "2026-10-07",
+        "comment": "Deduplicate adventure group entries by canonical AoN ID"
+      },
+      {
+        "date": "2026-10-07",
+        "comment": "Normalize AoN NoRedirect links in adventure group importer"
+      },
+      {
+        "date": "2026-10-06",
+        "comment": "Add a desktop tool to upload and replace Pathfinder 2e monster images."
+      },
+      {
+        "date": "2026-10-06",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "Add scripts that backfill monster statblocks and thumbnails from data already in SQL Server."
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "New imports and the HTML backfill write a Creature heading and labeled stats, and a preview-first updater fills existing rows that still lack that markdown."
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "Store Demiplane stat blocks as RawMD the stat cards can parse."
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "Trusted_Connection cannot authenticate to the Docker SQL Server, so scripts read MSSQL_USER and MSSQL_PASSWORD. The child-table filler is renamed to match what it writes, and empty RawHtml is filled by its own Demiplane script."
+      },
+      {
+        "date": "2026-10-04",
+        "comment": "Use a SQL login on Linux and separate the two backfill jobs."
+      },
       {
         "date": "2026-09-07",
         "comment": "Add monster thumbnail generator for pf2.MonsterImage."
