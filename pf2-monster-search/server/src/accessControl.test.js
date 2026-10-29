@@ -216,18 +216,17 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
       ip: '203.0.113.40',
       body: { password: wrong }
     });
-    assert.equal(failed.response.status, attempt === 5 ? 429 : 401);
+    assert.equal(failed.response.status, 401);
     assert.equal(failed.text.includes(wrong), false);
   }
-  const locked = await request(port, '/api/admin/unlock', {
+  const afterFailures = await request(port, '/api/admin/unlock', {
     method: 'POST',
     ip: '203.0.113.40',
     body: { password: ADMIN_PASSWORD }
   });
-  assert.equal(locked.response.status, 429);
-  assert.equal(Number(locked.response.headers.get('retry-after')) > 0, true);
-  assert.equal(locked.text.includes(ADMIN_PASSWORD), false);
-  assert.equal(locked.text.includes(wrong), false);
+  assert.equal(afterFailures.response.status, 200);
+  assert.equal(afterFailures.text.includes(ADMIN_PASSWORD), false);
+  assert.equal(afterFailures.text.includes(wrong), false);
 
   const otherIp = await request(port, '/api/admin/unlock', {
     method: 'POST',
@@ -276,5 +275,4 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
   assert.equal(logged.includes(ADMIN_PASSWORD), false);
   assert.equal(logged.includes(ART_PASSWORD), false);
   assert.match(logged, /\[admin-unlock] failed ip=203\.0\.113\.40/);
-  assert.match(logged, /\[admin-unlock] locked-out ip=203\.0\.113\.40/);
 });

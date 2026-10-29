@@ -141,22 +141,9 @@ function rejectAdminIfLocked(req, res) {
   return true;
 }
 
-function rejectIfUnlockLocked(res, ip, kind, gate) {
-  if (gate.allowed) return false;
-  console.warn(`[${kind}-unlock] locked-out ip=${ip} retryAfterSec=${gate.retryAfterSec}`);
-  res.set('Retry-After', String(gate.retryAfterSec));
-  res.status(429).json({ error: 'Too many attempts. Try again later.' });
-  return true;
-}
-
 function recordUnlockFailure(res, ip, kind, limiter) {
   const result = limiter.fail(ip);
-  console.warn(`[${kind}-unlock] failed ip=${ip} failures=${result.failures} locked=${result.locked}`);
-  if (result.locked) {
-    res.set('Retry-After', String(result.retryAfterSec));
-    res.status(429).json({ error: 'Too many attempts. Try again later.' });
-    return true;
-  }
+  console.warn(`[${kind}-unlock] failed ip=${ip} failures=${result.failures}`);
   res.status(401).json({ error: 'Invalid password' });
   return true;
 }
@@ -1017,8 +1004,6 @@ app.post('/api/art/unlock', (req, res) => {
     return;
   }
 
-  if (rejectIfUnlockLocked(res, ip, 'art', artAttemptLimiter.check(ip))) return;
-
   if (!art.hasSecret()) {
     console.warn(`[art-unlock] rejected ip=${ip} reason=not_configured`);
     res.status(503).json({ error: 'Art unlock is not configured.' });
@@ -1038,8 +1023,6 @@ app.post('/api/art/unlock', (req, res) => {
 
 app.post('/api/admin/unlock', (req, res) => {
   const ip = clientIp(req);
-  if (rejectIfUnlockLocked(res, ip, 'admin', adminAttemptLimiter.check(ip))) return;
-
   if (!adminUnlockConfigured()) {
     console.warn(`[admin-unlock] rejected ip=${ip} reason=not_configured`);
     res.status(503).json({ error: 'Admin unlock is not configured.' });
