@@ -1,8 +1,12 @@
 {
-  "generatedAt": "2026-10-29T05:59:39.701Z",
+  "generatedAt": "2026-11-01T03:00:14.667Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-10-29",
+        "comment": "Let admins replace existing creature art from the monster modal."
+      },
       {
         "date": "2026-10-28",
         "comment": "Stop locking out art and admin unlock after failed attempts so a correct password still succeeds."
