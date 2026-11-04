@@ -478,11 +478,17 @@ A `debug` object is added only when `DEBUG_SQL=true`. Leave that variable unset 
 
 These writes return `401` without a valid admin cookie:
 
+- `GET /api/user-monsters` lists custom creatures (`limit`, `offset`). `GET /api/user-monsters/:userMonsterId` returns one, including `rawMD`. Search id `-10` is creature `10`. These reads stay public.
+- `POST /api/user-monsters/preview` returns the normalized `rawMD` and column values without saving.
+- `POST /api/user-monsters/import` creates or updates a creature. Send `traits`, `attacks` (`{ "type": "Melee", "text": "..." }`), `abilities` (`{ "name", "text" }`), and `hardness` with the usual stat fields. The server builds the card markdown. Include `userMonsterId` or `monsterId` to update an existing row.
+- `POST /api/admin/lock` clears the admin cookie.
 - `POST /api/user-monsters`
 - `PUT /api/user-monsters`
-- `PUT /api/user-monsters/:userMonsterId`
+- `PUT /api/user-monsters/:userMonsterId` replaces every stat field. Omitted fields are stored as null.
+- `PATCH /api/user-monsters/:userMonsterId` updates only the keys present in the body. Send `null` to clear a nullable field. `name` cannot be cleared. Include `imageDataUrl` to replace art, or `null` to remove it. `rawMD` is rewritten into the card format: a `# Name` title, then `---`, then lines such as `**Perception** +8`, `**AC** 19`, `**HP** 40`, `**Melee** ...`, and `**Ability Name**` for specials. HTML stat blocks are converted to that markdown before they are stored.
 - `PATCH /api/user-monsters/:userMonsterId/name`
 - `DELETE /api/user-monsters/:userMonsterId`
+- `DELETE /api/user-monsters/:userMonsterId/image` clears art and leaves the stat block in place.
 - `PUT /api/user-monsters/:userMonsterId/image`
 - `PUT /api/monsters/:monsterId/image` (also `403` while `ENABLE_ART=true`)
 

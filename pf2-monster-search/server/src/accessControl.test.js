@@ -183,10 +183,14 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
   assert.equal(adminConfig.json.artUpload, true);
 
   const writes = [
+    ['POST', '/api/user-monsters/preview', { name: 'Probe', hp: 40 }],
+    ['POST', '/api/user-monsters/import', { name: 'Probe', hp: 40 }],
     ['POST', '/api/user-monsters', { name: 'Probe' }],
     ['PUT', '/api/user-monsters', { name: 'Probe' }],
     ['PUT', '/api/user-monsters/1', { name: 'Probe' }],
+    ['PATCH', '/api/user-monsters/1', { hp: 40 }],
     ['PATCH', '/api/user-monsters/1/name', { name: 'Probe' }],
+    ['DELETE', '/api/user-monsters/1/image'],
     ['DELETE', '/api/user-monsters/1'],
     ['PUT', '/api/user-monsters/1/image', { imageDataUrl: 'data:image/png;base64,AA==' }]
   ];

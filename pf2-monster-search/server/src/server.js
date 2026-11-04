@@ -348,6 +348,40 @@ function parseImagePayload(body) {
   return { buffer, contentType };
 }
 
+function formatUserMonsterRawMD(rawMD, name) {
+  let text = String(rawMD || '').replace(/\r\n/g, '\n').trim();
+  if (!text) return null;
+  if (looksLikeHtmlStatBlock(text)) text = htmlStatBlockToText(text);
+  if (!text) return null;
+  if (!/^#\s+\S/m.test(text)) {
+    text = `# ${name || 'Creature'}\n\n${text}`;
+  }
+
+  const lines = text.split('\n');
+  const structured = lines.findIndex((line, index) => {
+    if (index === 0 && line.trim().startsWith('# ')) return false;
+    const trimmed = line.trim();
+    return trimmed === '---'
+      || trimmed.startsWith('## ')
+      || trimmed.startsWith('**Source**')
+      || trimmed.startsWith('![')
+      || trimmed.startsWith('|')
+      || /^\*\*(?:Perception|Languages|Skills|Str|Dex|Con|Int|Wis|Cha|AC|HP|Immunities|Weaknesses|Resistances|Speed|Melee|Ranged)\*\*/i.test(trimmed);
+  });
+
+  if (structured !== -1) {
+    const marker = lines[structured].trim();
+    const alreadyMarked = marker === '---'
+      || marker.startsWith('## ')
+      || marker.startsWith('**Source**')
+      || marker.startsWith('![')
+      || marker.startsWith('|');
+    if (!alreadyMarked) lines.splice(structured, 0, '---');
+  }
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function buildUserMonsterPayload(body) {
   const name = cleanString(body?.name ?? body?.Name, 255);
   if (!name) {
@@ -396,7 +430,10 @@ function buildUserMonsterPayload(body) {
     resistances: cleanString(body?.resistances ?? body?.Resistances, 8000),
     weaknesses: cleanString(body?.weaknesses ?? body?.Weaknesses, 8000),
     speed: cleanString(body?.speed ?? body?.Speed, 8000),
-    rawMD: cleanString(body?.rawMD ?? body?.RawMD ?? body?.description, 100000),
+    rawMD: formatUserMonsterRawMD(
+      cleanString(body?.rawMD ?? body?.RawMD ?? body?.description, 100000),
+      name
+    ),
     image: parseImagePayload(body)
   };
 }
@@ -1037,6 +1074,11 @@ app.post('/api/admin/unlock', (req, res) => {
   adminAttemptLimiter.succeed(ip);
   res.cookie(ADMIN_COOKIE, signUnlock('admin', adminCookieSecret()), artCookieOptions(req));
   res.json({ ok: true, adminUnlocked: true });
+});
+
+app.post('/api/admin/lock', (req, res) => {
+  res.clearCookie(ADMIN_COOKIE, artCookieOptions(req));
+  res.json({ ok: true, adminUnlocked: false });
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -2405,6 +2447,218 @@ async function upsertUserMonster(req, res, { routeLabel, userMonsterIdFromRoute 
   }
 }
 
+function formatSignedMod(value, fieldName) {
+  const n = cleanInt(value, fieldName);
+  if (n === null) return null;
+  return n >= 0 ? `+${n}` : String(n);
+}
+
+function joinList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ') || null;
+  }
+  return cleanString(value, 8000);
+}
+
+function buildImportedStatBlock(body, name) {
+  const explicit = cleanString(body?.rawMD ?? body?.RawMD, 100000);
+  if (explicit && /^(?:---|## |\*\*Source\*\*)/m.test(explicit)) {
+    return formatUserMonsterRawMD(explicit, name);
+  }
+
+  const lines = [`# ${name}`, ''];
+  const flavor = cleanString(body?.description ?? body?.flavor ?? explicit, 20000);
+  if (flavor) lines.push(flavor, '');
+  lines.push('---');
+
+  const push = (label, value) => {
+    const text = value == null ? '' : String(value).trim();
+    if (text) lines.push(`**${label}** ${text}`);
+  };
+
+  push('Source', body.sourceBook ?? body.SourceBook);
+  push('Traits', joinList(body.traits ?? body.Traits));
+
+  const perception = formatSignedMod(body.perception ?? body.Perception, 'Perception');
+  const senses = cleanString(body.senses ?? body.Senses, 8000);
+  if (perception || senses) push('Perception', [perception, senses].filter(Boolean).join('; '));
+  push('Languages', body.languages ?? body.Languages);
+  push('Skills', body.skills ?? body.Skills);
+
+  const mods = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'].map((label) => {
+    const raw = body[`${label.toLowerCase()}Mod`] ?? body[`${label}Mod`];
+    const mod = formatSignedMod(raw, label);
+    return mod ? `**${label}** ${mod}` : null;
+  }).filter(Boolean);
+  if (mods.length) lines.push(mods.join(', '));
+
+  const fort = formatSignedMod(body.fortitude ?? body.Fortitude, 'Fortitude');
+  const reflex = formatSignedMod(body.reflex ?? body.Reflex, 'Reflex');
+  const will = formatSignedMod(body.will ?? body.Will, 'Will');
+  const ac = cleanInt(body.ac ?? body.AC, 'AC');
+  const saves = [
+    ac === null ? null : `**AC** ${ac}`,
+    fort ? `**Fort** ${fort}` : null,
+    reflex ? `**Ref** ${reflex}` : null,
+    will ? `**Will** ${will}` : null
+  ].filter(Boolean);
+  if (saves.length) lines.push(saves.join('; '));
+
+  const hp = cleanInt(body.hp ?? body.HP, 'HP');
+  const hardness = cleanInt(body.hardness ?? body.Hardness, 'Hardness');
+  const hpLine = [
+    hp === null ? null : `**HP** ${hp}`,
+    hardness === null ? null : `**Hardness** ${hardness}`
+  ].filter(Boolean);
+  if (hpLine.length) lines.push(hpLine.join('; '));
+
+  push('Immunities', body.immunities ?? body.Immunities);
+  push('Resistances', body.resistances ?? body.Resistances);
+  push('Weaknesses', body.weaknesses ?? body.Weaknesses);
+  push('Speed', body.speed ?? body.Speed);
+
+  for (const attack of Array.isArray(body.attacks) ? body.attacks : []) {
+    if (typeof attack === 'string') {
+      const text = attack.trim();
+      if (text) lines.push('', `**Melee** ${text}`);
+      continue;
+    }
+    const type = cleanString(attack?.type ?? attack?.Type, 40) || 'Melee';
+    const text = cleanString(attack?.text ?? attack?.Text ?? attack?.description, 4000);
+    if (text) lines.push('', `**${type}** ${text}`);
+  }
+
+  for (const ability of Array.isArray(body.abilities) ? body.abilities : []) {
+    const abilityName = cleanString(ability?.name ?? ability?.Name, 200);
+    const text = cleanString(ability?.text ?? ability?.Text ?? ability?.description, 8000);
+    if (!abilityName) continue;
+    lines.push('', text ? `**${abilityName}** ${text}` : `**${abilityName}**`);
+  }
+
+  return formatUserMonsterRawMD(lines.join('\n'), name);
+}
+
+function withImportedStatBlock(body) {
+  const next = { ...(body || {}) };
+  const structured = next.attacks || next.abilities || next.traits || next.Traits
+    || next.hardness != null || next.Hardness != null;
+  if (!structured) return next;
+  const name = cleanString(next.name ?? next.Name, 255) || 'Creature';
+  next.rawMD = buildImportedStatBlock(next, name);
+  return next;
+}
+
+app.get('/api/user-monsters', async (req, res) => {
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+    res.status(400).json({ error: 'limit and offset must be integers.' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('limit', sql.Int, limit)
+      .input('offset', sql.Int, offset)
+      .query(`
+        SELECT
+          -UserMonsterId AS MonsterId,
+          UserMonsterId,
+          Name,
+          Level,
+          Rarity,
+          Size,
+          SourceBook,
+          GameSystem,
+          HP,
+          AC,
+          Perception,
+          Speed,
+          CASE WHEN Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', UserMonsterId, N'/image/thumb') END AS ImageUrl,
+          UpdatedAt,
+          COUNT(*) OVER() AS TotalCount
+        FROM pf2.UserMonster
+        ORDER BY Name, UserMonsterId
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+      `);
+    const rows = result.recordset || [];
+    const total = rows[0]?.TotalCount ?? 0;
+    res.json({
+      results: rows.map(({ TotalCount, ...row }) => row),
+      total,
+      limit,
+      offset
+    });
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.get('/api/user-monsters/:userMonsterId', async (req, res, next) => {
+  if (['image', 'preview', 'import'].includes(String(req.params.userMonsterId).toLowerCase())) return next();
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+  if (!userMonsterId) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    const row = await fetchUserMonsterById(pool, userMonsterId);
+    if (!row) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+    res.json(presentCreature(row));
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.post('/api/user-monsters/preview', (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+  try {
+    const payload = buildUserMonsterPayload(withImportedStatBlock(req.body));
+    res.json({
+      name: payload.name,
+      level: payload.level,
+      size: payload.size,
+      sourceBook: payload.sourceBook,
+      perception: payload.perception,
+      senses: payload.senses,
+      languages: payload.languages,
+      skills: payload.skills,
+      strMod: payload.strMod,
+      dexMod: payload.dexMod,
+      conMod: payload.conMod,
+      intMod: payload.intMod,
+      wisMod: payload.wisMod,
+      chaMod: payload.chaMod,
+      ac: payload.ac,
+      fortitude: payload.fortitude,
+      reflex: payload.reflex,
+      will: payload.will,
+      hp: payload.hp,
+      immunities: payload.immunities,
+      resistances: payload.resistances,
+      weaknesses: payload.weaknesses,
+      speed: payload.speed,
+      rawMD: payload.rawMD
+    });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.post('/api/user-monsters/import', (req, res) => {
+  req.body = withImportedStatBlock(req.body);
+  return upsertUserMonster(req, res, { routeLabel: 'POST /api/user-monsters/import' });
+});
+
 app.post('/api/user-monsters', (req, res) => upsertUserMonster(req, res, {
   routeLabel: 'POST /api/user-monsters'
 }));
@@ -2426,6 +2680,140 @@ app.put('/api/user-monsters/:userMonsterId', (req, res, next) => {
     routeLabel: 'PUT /api/user-monsters/:userMonsterId',
     userMonsterIdFromRoute: userMonsterId
   });
+});
+
+const USER_MONSTER_PATCH_FIELDS = [
+  { keys: ['name', 'Name'], column: 'Name', kind: 'string', max: 255, sqlType: () => sql.NVarChar(255) },
+  { keys: ['level', 'Level'], column: 'Level', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['rarity', 'Rarity'], column: 'Rarity', kind: 'string', max: 100, sqlType: () => sql.NVarChar(100) },
+  { keys: ['size', 'Size'], column: 'Size', kind: 'string', max: 100, sqlType: () => sql.NVarChar(100) },
+  { keys: ['alignment', 'Alignment'], column: 'Alignment', kind: 'string', max: 100, sqlType: () => sql.NVarChar(100) },
+  { keys: ['family', 'Family'], column: 'Family', kind: 'string', max: 255, sqlType: () => sql.NVarChar(255) },
+  { keys: ['sourceBook', 'SourceBook'], column: 'SourceBook', kind: 'string', max: 255, sqlType: () => sql.NVarChar(255) },
+  { keys: ['sourcePage', 'SourcePage'], column: 'SourcePage', kind: 'string', max: 50, sqlType: () => sql.NVarChar(50) },
+  { keys: ['aonUrl', 'AonUrl'], column: 'AonUrl', kind: 'string', max: 2048, sqlType: () => sql.NVarChar(2048) },
+  { keys: ['gameSystem', 'GameSystem'], column: 'GameSystem', kind: 'gameSystem', sqlType: () => sql.NVarChar(3) },
+  { keys: ['isUnique', 'IsUnique'], column: 'IsUnique', kind: 'bool', sqlType: () => sql.Bit },
+  { keys: ['isNpc', 'isNPC', 'IsNPC'], column: 'IsNPC', kind: 'bool', sqlType: () => sql.Bit },
+  { keys: ['perception', 'Perception'], column: 'Perception', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['senses', 'Senses'], column: 'Senses', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['languages', 'Languages'], column: 'Languages', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['skills', 'Skills'], column: 'Skills', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['items', 'Items'], column: 'Items', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['strMod', 'StrMod'], column: 'StrMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['dexMod', 'DexMod'], column: 'DexMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['conMod', 'ConMod'], column: 'ConMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['intMod', 'IntMod'], column: 'IntMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['wisMod', 'WisMod'], column: 'WisMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['chaMod', 'ChaMod'], column: 'ChaMod', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['ac', 'AC'], column: 'AC', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['fortitude', 'Fortitude'], column: 'Fortitude', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['reflex', 'Reflex'], column: 'Reflex', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['will', 'Will'], column: 'Will', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['hp', 'HP'], column: 'HP', kind: 'int', sqlType: () => sql.Int },
+  { keys: ['immunities', 'Immunities'], column: 'Immunities', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['resistances', 'Resistances'], column: 'Resistances', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['weaknesses', 'Weaknesses'], column: 'Weaknesses', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['speed', 'Speed'], column: 'Speed', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+  { keys: ['rawMD', 'RawMD', 'description'], column: 'RawMD', kind: 'string', max: 100000, sqlType: () => sql.NVarChar(sql.MAX) }
+];
+
+function firstBodyValue(body, keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) return body[key];
+  }
+  return undefined;
+}
+
+function patchValue(field, raw) {
+  if (field.kind === 'string') {
+    const value = cleanString(raw, field.max);
+    return field.column === 'RawMD' ? formatUserMonsterRawMD(value) : value;
+  }
+  if (field.kind === 'int') return cleanInt(raw, field.column);
+  if (field.kind === 'bool') {
+    const value = cleanBool(raw);
+    if (field.column === 'IsNPC' && value === null) return 0;
+    return value;
+  }
+  const gameSystem = (cleanString(raw, 3) || '').toUpperCase();
+  if (gameSystem !== 'PF2' && gameSystem !== 'SF2') {
+    const err = new Error('GameSystem must be PF2 or SF2.');
+    err.statusCode = 400;
+    throw err;
+  }
+  return gameSystem;
+}
+
+app.patch('/api/user-monsters/:userMonsterId', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+  if (!userMonsterId) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  const body = req.body || {};
+  const sets = [];
+  let pool;
+  let request;
+
+  try {
+    pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    request = pool.request().input('userMonsterId', sql.Int, userMonsterId);
+
+    for (const field of USER_MONSTER_PATCH_FIELDS) {
+      const raw = firstBodyValue(body, field.keys);
+      if (raw === undefined) continue;
+      const value = patchValue(field, raw);
+      if (field.column === 'Name' && !value) {
+        res.status(400).json({ error: 'Name is required.' });
+        return;
+      }
+      const param = `p${sets.length}`;
+      request.input(param, field.sqlType(), value);
+      sets.push(`${field.column} = @${param}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'imageDataUrl')
+      || Object.prototype.hasOwnProperty.call(body, 'imageBase64')) {
+      const image = parseImagePayload(body);
+      if (image.buffer) {
+        request.input('image', sql.VarBinary(sql.MAX), image.buffer);
+        request.input('imageContentType', sql.NVarChar(100), image.contentType);
+        sets.push('Image = @image', 'ImageContentType = @imageContentType');
+      } else {
+        sets.push('Image = NULL', 'ImageContentType = NULL');
+      }
+    }
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: getErrorMessage(err) });
+    return;
+  }
+
+  if (!sets.length) {
+    res.status(400).json({ error: 'No fields to update.' });
+    return;
+  }
+
+  try {
+    const result = await request.query(`
+      UPDATE pf2.UserMonster
+      SET ${sets.join(', ')}, UpdatedAt = SYSUTCDATETIME()
+      WHERE UserMonsterId = @userMonsterId;
+    `);
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+    const row = await fetchUserMonsterById(pool, userMonsterId);
+    res.json(presentCreature(row));
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
 });
 
 app.patch('/api/user-monsters/:userMonsterId/name', async (req, res) => {
@@ -2468,6 +2856,36 @@ app.patch('/api/user-monsters/:userMonsterId/name', async (req, res) => {
     }
 
     res.json({ UserMonsterId: userMonsterId, Name: name });
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.delete('/api/user-monsters/:userMonsterId/image', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
+  const userMonsterId = parseUserMonsterId(req.params.userMonsterId);
+  if (!userMonsterId) {
+    res.status(400).json({ error: 'Invalid userMonsterId' });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    await ensureUserMonsterSchema(pool);
+    const result = await pool.request()
+      .input('userMonsterId', sql.Int, userMonsterId)
+      .query(`
+        UPDATE pf2.UserMonster
+        SET Image = NULL, ImageContentType = NULL, UpdatedAt = SYSUTCDATETIME()
+        WHERE UserMonsterId = @userMonsterId;
+      `);
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User monster not found' });
+      return;
+    }
+    res.status(204).send();
   } catch (err) {
     logError(err);
     res.status(500).json({ error: getErrorMessage(err) });
