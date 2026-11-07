@@ -251,14 +251,14 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
   const previousUnlock = process.env.ADMIN_UNLOCK_SECRET;
   const previousCookie = process.env.ADMIN_COOKIE_SECRET;
   try {
-    process.env.ADMIN_UNLOCK_SECRET = 'too-short';
+    process.env.ADMIN_UNLOCK_SECRET = 'short';
     const unconfigured = await request(port, '/api/admin/unlock', {
       method: 'POST',
       ip: '203.0.113.60',
-      body: { password: 'too-short' }
+      body: { password: 'short' }
     });
     assert.equal(unconfigured.response.status, 503);
-    assert.equal(unconfigured.text.includes('too-short'), false);
+    assert.equal(unconfigured.text.includes('short'), false);
 
     process.env.ADMIN_UNLOCK_SECRET = ADMIN_PASSWORD;
     process.env.ADMIN_COOKIE_SECRET = '';

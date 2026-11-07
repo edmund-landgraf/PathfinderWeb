@@ -3290,7 +3290,7 @@ async function startServer() {
       console.log(
         adminUnlockConfigured()
           ? 'Admin unlock: configured'
-          : 'Admin unlock: disabled (set ADMIN_UNLOCK_SECRET and ADMIN_COOKIE_SECRET, each at least 16 characters)'
+          : 'Admin unlock: disabled (set ADMIN_UNLOCK_SECRET, at least 8 characters, and ADMIN_COOKIE_SECRET, at least 16 characters)'
       );
       console.log(`TRUST_PROXY_HOPS=${JSON.stringify(trustProxySetting())}`);
       console.log(`MONSTER_IMAGE_CACHE_MAX=${monsterImageCache.maxEntries}`);

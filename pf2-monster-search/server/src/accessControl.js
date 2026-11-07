@@ -7,6 +7,7 @@ export const UNLOCK_TTL_MS = 12 * 60 * 60 * 1000;
 export const ADMIN_UNLOCK_SECRET_ENV = 'ADMIN_UNLOCK_SECRET';
 export const ADMIN_COOKIE_SECRET_ENV = 'ADMIN_COOKIE_SECRET';
 export const MIN_ADMIN_SECRET_LENGTH = 16;
+export const MIN_ADMIN_PASSWORD_LENGTH = 8;
 
 export const ADMIN_MAX_FAILURES = 5;
 export const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
@@ -39,7 +40,7 @@ export function isStrongSecret(value) {
 
 export function adminUnlockSecret() {
   const value = readEnv(ADMIN_UNLOCK_SECRET_ENV).trim();
-  return isStrongSecret(value) ? value : '';
+  return value.length >= MIN_ADMIN_PASSWORD_LENGTH ? value : '';
 }
 
 export function adminCookieSecret() {
