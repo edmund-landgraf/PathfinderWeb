@@ -758,6 +758,7 @@ function ArtProvider({ children }) {
   const [enableArtByEnv, setEnableArtByEnv] = useState(null);
   const [unlocked, setUnlocked] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [artUpload, setArtUpload] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -772,6 +773,7 @@ function ArtProvider({ children }) {
         setEnableArtByEnv(Boolean(data.enableArt));
         setUnlocked(Boolean(data.artUnlocked));
         setAdminUnlocked(Boolean(data.adminUnlocked));
+        setArtUpload(Boolean(data.artUpload));
       })
       .catch(() => {
         if (!cancelled) setEnableArtByEnv(true);
@@ -794,9 +796,10 @@ function ArtProvider({ children }) {
     }
 
     setUnlocked(true);
+    if (enableArtByEnv === false) setArtUpload(true);
     window.dispatchEvent(new Event('pf2-art-unlocked'));
     return true;
-  }, []);
+  }, [enableArtByEnv]);
 
   const unlockAdmin = useCallback(async (password) => {
     const res = await fetchApi('/api/admin/unlock', {
@@ -815,12 +818,12 @@ function ArtProvider({ children }) {
 
   const value = useMemo(() => ({
     artEnabled: enableArtByEnv === true || unlocked,
-    artCanUpload: enableArtByEnv === false && adminUnlocked,
+    artCanUpload: artUpload,
     showArtUnlock: enableArtByEnv === false,
     adminEnabled: adminUnlocked,
     unlockArt,
     unlockAdmin
-  }), [enableArtByEnv, unlocked, adminUnlocked, unlockArt, unlockAdmin]);
+  }), [enableArtByEnv, unlocked, adminUnlocked, artUpload, unlockArt, unlockAdmin]);
 
   return <ArtContext.Provider value={value}>{children}</ArtContext.Provider>;
 }
@@ -4352,7 +4355,7 @@ function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) 
   );
 }
 
-function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, canUpload = false, onEmptyClick }) {
+function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, canUpload = false, canReplace = false, onEmptyClick }) {
   const { artEnabled } = useArt();
   const [failed, setFailed] = useState(false);
   const [src, setSrc] = useState(imageUrl);
@@ -4386,7 +4389,7 @@ function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, 
             onImageOpen();
           }}
         />
-        {canUpload && onEmptyClick && (
+        {canReplace && onEmptyClick && (
           <button
             type="button"
             className="modal-replace-art"
@@ -4624,7 +4627,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
   const modalRef = useRef(null);
   const { rawMD, normalFields, rawFields } = splitEntityFields(monster);
   const descriptionMD = useMemo(() => extractMarkdownDescriptionMonster(rawMD), [rawMD]);
-  const { artEnabled, adminEnabled } = useArt();
+  const { artEnabled, artCanUpload, adminEnabled } = useArt();
   const imageUrl = artEnabled ? getMonsterImageUrl(monster, 'full') : '';
   const fallbackImageUrl = artEnabled && monster.ImageUrl && monster.ImageUrl !== imageUrl
     ? monster.ImageUrl
@@ -4688,7 +4691,8 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
               alt={monster.Name}
               fallbackIcon={<ImageIcon />}
               onImageOpen={() => setIsImagePopoutOpen(true)}
-              canUpload={adminEnabled}
+              canUpload={artCanUpload}
+              canReplace={adminEnabled}
               onEmptyClick={() => setIsArtUploadOpen(true)}
             />
 
