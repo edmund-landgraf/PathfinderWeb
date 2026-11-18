@@ -204,7 +204,7 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
     assert.equal(withArt.response.status, 401, `${method} ${path} with the art cookie`);
   }
 
-  // Canon art: the art password may upload (fill-empty-only is enforced in src/art);
+  // Canon art: the art password may upload and replace existing art;
   // anonymous callers may not. A bogus image is rejected by the file checks before any DB work.
   const canonBody = { imageDataUrl: 'data:image/png;base64,AA==' };
   const canonAnon = await request(port, '/api/monsters/1/image', { method: 'PUT', ip: '203.0.113.32', body: canonBody });

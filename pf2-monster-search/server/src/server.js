@@ -3108,8 +3108,8 @@ app.get('/api/monsters/:monsterId', async (req, res) => {
   }
 });
 
-// Canon art: admin may replace; an art-password session may only fill EMPTY art (409 if art
-// exists), with file checks, rate limits, audit and review queue. See src/art/index.js.
+// Canon art: admin or an art-password session may upload or replace art, with file checks,
+// rate limits, audit and review queue. See src/art/index.js.
 const monsterImageUpload = art.uploadHandler('monster');
 app.put('/api/monsters/:monsterId/image', (req, res) => {
   if (!isArtUploadAllowed(req)) {

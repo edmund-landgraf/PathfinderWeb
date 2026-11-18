@@ -147,7 +147,7 @@ async function copyTextToClipboard(text) {
   textarea.remove();
 }
 
-function RowContextMenu({ x, y, items, onClose }) {
+function RowContextMenu({ x, y, items, onClose, zIndex }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -175,7 +175,7 @@ function RowContextMenu({ x, y, items, onClose }) {
     <div
       ref={menuRef}
       className="rowContextMenu"
-      style={{ left: x, top: y }}
+      style={{ left: x, top: y, zIndex }}
       role="menu"
     >
       {items.map((item) => (
@@ -4359,11 +4359,21 @@ function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, 
   const { artEnabled } = useArt();
   const [failed, setFailed] = useState(false);
   const [src, setSrc] = useState(imageUrl);
+  const [menu, setMenu] = useState(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   useEffect(() => {
     setSrc(imageUrl);
     setFailed(false);
+    setMenu(null);
   }, [imageUrl]);
+
+  function openReplaceMenu(event) {
+    if (!canReplace || !onEmptyClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY });
+  }
 
   if (!artEnabled) {
     return <div className="modal-no-art" aria-hidden="true" />;
@@ -4371,7 +4381,7 @@ function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, 
 
   if (src && !failed) {
     return (
-      <div className="modal-art-frame">
+      <div className="modal-art-frame" onContextMenu={openReplaceMenu}>
         <img
           className="modal-image modal-image-clickable"
           src={src}
@@ -4401,6 +4411,21 @@ function ModalArt({ imageUrl, fallbackUrl = '', alt, fallbackIcon, onImageOpen, 
           >
             Replace art
           </button>
+        )}
+        {menu && (
+          <RowContextMenu
+            x={menu.x}
+            y={menu.y}
+            zIndex={10030}
+            onClose={closeMenu}
+            items={[{
+              label: 'Replace art',
+              onClick: () => {
+                closeMenu();
+                onEmptyClick();
+              }
+            }]}
+          />
         )}
       </div>
     );
@@ -4692,7 +4717,7 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
               fallbackIcon={<ImageIcon />}
               onImageOpen={() => setIsImagePopoutOpen(true)}
               canUpload={artCanUpload}
-              canReplace={adminEnabled}
+              canReplace={adminEnabled || (artCanUpload && !isUserGeneratedMonster(monster))}
               onEmptyClick={() => setIsArtUploadOpen(true)}
             />
 

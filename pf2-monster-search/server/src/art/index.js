@@ -130,7 +130,8 @@ export function createArtGuardrails(opts) {
         tx = new sql.Transaction(p);
         await tx.begin();
         const prev = await readCurrentArt(new sql.Request(tx), type, id);
-        if (!admin && prev.image) {
+        // Canon art may be replaced by an art-password session. User-generated art stays fill-empty-only.
+        if (!admin && type !== 'monster' && prev.image) {
           await tx.rollback(); tx = null;
           return res.status(409).json({ error: 'This creature already has art. Replacing art requires admin.' });
         }
