@@ -1,8 +1,28 @@
 {
-  "generatedAt": "2026-11-01T03:00:14.667Z",
+  "generatedAt": "2026-11-18T05:40:29.912Z",
   "web": {
     "title": "PF2 Search (Web)",
     "entries": [
+      {
+        "date": "2026-11-17",
+        "comment": "Let an art-password session replace existing canon creature art."
+      },
+      {
+        "date": "2026-11-07",
+        "comment": "Allow the admin unlock password to be shorter than the cookie signing key."
+      },
+      {
+        "date": "2026-11-07",
+        "comment": "Show art upload from the server flag so an art-password session can fill empty canon art."
+      },
+      {
+        "date": "2026-11-04",
+        "comment": "Add custom-creature import, partial updates, and card markdown so admins can edit user monsters without replacing the whole row."
+      },
+      {
+        "date": "2026-11-04",
+        "comment": "Publish the creature-art changelog entry generated after the last release."
+      },
       {
         "date": "2026-10-29",
         "comment": "Let admins replace existing creature art from the monster modal."
@@ -203,207 +223,6 @@
   },
   "utilities": {
     "title": "Pathfinder Utilities",
-    "entries": [
-      {
-        "date": "2026-10-26",
-        "comment": "Allow shrinking monster images without saving a local copy."
-      },
-      {
-        "date": "2026-10-26",
-        "comment": "Back up and shrink monster images larger than 4 MB."
-      },
-      {
-        "date": "2026-10-26",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-25",
-        "comment": "Add source update report and local scraper outputs"
-      },
-      {
-        "date": "2026-10-25",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-25",
-        "comment": "EOF"
-      },
-      {
-        "date": "2026-10-25",
-        "comment": "Save AoN errata, missing monster art, and missing 1e beast reports."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Add RawJson backfill scripts for empty equipment, feat, spell, and monster fields."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Also skip the warden placeholder and repair truncated or double-encoded CDN paths."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Commit RawJson backfills in chunks and use SQL login for Docker."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Default SQL auth to the Docker sa password off Windows."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Fall back to thumbnail art when Demiplane full images fail to download."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Fix source-count SQL and use Bing for creature image preview."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "Repair broken Demiplane art URLs before import."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "RowCount is reserved in SQL Server, and Google image search was blocked without a Custom Search key."
-      },
-      {
-        "date": "2026-10-23",
-        "comment": "SQL Server in Docker does not support Trusted_Connection, so non-Windows scripts need a password when MSSQL_PASSWORD is unset."
-      },
-      {
-        "date": "2026-10-20",
-        "comment": "Add PF2 equipment, feat, and spell AoN update scripts."
-      },
-      {
-        "date": "2026-10-20",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-10",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-10",
-        "comment": "Save chosen creature art locally and review candidates in a grid."
-      },
-      {
-        "date": "2026-10-10",
-        "comment": "The review page shows the stat block and source link, stores the full image on this server, and keeps the original address as metadata."
-      },
-      {
-        "date": "2026-10-09",
-        "comment": "Add AoN gap-fill scripts and a browser review for creature art."
-      },
-      {
-        "date": "2026-10-09",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-09",
-        "comment": "Empty AoN stat blocks can be refreshed, missing creatures can be inserted, and image choices are saved only after a manual OK."
-      },
-      {
-        "date": "2026-10-09",
-        "comment": "Use Windows trusted connection locally and SQL login elsewhere."
-      },
-      {
-        "date": "2026-10-07",
-        "comment": "Add Adventure source-group fallback importer"
-      },
-      {
-        "date": "2026-10-07",
-        "comment": "Deduplicate adventure group entries by canonical AoN ID"
-      },
-      {
-        "date": "2026-10-07",
-        "comment": "Normalize AoN NoRedirect links in adventure group importer"
-      },
-      {
-        "date": "2026-10-06",
-        "comment": "Add a desktop tool to upload and replace Pathfinder 2e monster images."
-      },
-      {
-        "date": "2026-10-06",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "Add scripts that backfill monster statblocks and thumbnails from data already in SQL Server."
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "New imports and the HTML backfill write a Creature heading and labeled stats, and a preview-first updater fills existing rows that still lack that markdown."
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "Store Demiplane stat blocks as RawMD the stat cards can parse."
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "Trusted_Connection cannot authenticate to the Docker SQL Server, so scripts read MSSQL_USER and MSSQL_PASSWORD. The child-table filler is renamed to match what it writes, and empty RawHtml is filled by its own Demiplane script."
-      },
-      {
-        "date": "2026-10-04",
-        "comment": "Use a SQL login on Linux and separate the two backfill jobs."
-      },
-      {
-        "date": "2026-09-07",
-        "comment": "Add monster thumbnail generator for pf2.MonsterImage."
-      },
-      {
-        "date": "2026-09-07",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-09-07",
-        "comment": "Date windows now match when Archives of Nethys posted a book, so late-added adventure paths are picked up without widening publication-date ranges."
-      },
-      {
-        "date": "2026-09-07",
-        "comment": "Fill missing MonsterThumbnail WebP previews from stored art using the same localhost SQL connection as the other importers."
-      },
-      {
-        "date": "2026-09-07",
-        "comment": "Filter AoN source imports by homepage listed date and include Adventures."
-      },
-      {
-        "date": "2026-08-17",
-        "comment": "Add Demiplane missing creature importer"
-      },
-      {
-        "date": "2026-08-17",
-        "comment": "Add Demiplane monster image importer"
-      },
-      {
-        "date": "2026-08-17",
-        "comment": "Skip failed Demiplane creature images"
-      },
-      {
-        "date": "2026-08-16",
-        "comment": "Add 1e beast scrapers and monster image import script."
-      },
-      {
-        "date": "2026-08-16",
-        "comment": "Add AoN source update tooling"
-      },
-      {
-        "date": "2026-08-16",
-        "comment": "Co-authored-by: Cursor <cursoragent@cursor.com>"
-      },
-      {
-        "date": "2026-08-16",
-        "comment": "Stop collapsing AoN named variants onto a shared page URL."
-      },
-      {
-        "date": "2026-06-15",
-        "comment": "Initial commit"
-      }
-    ]
+    "entries": []
   }
 }
