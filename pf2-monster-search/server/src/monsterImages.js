@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { sql } from './db.js';
 import { MonsterImageCache } from './monsterImageCache.js';
 
@@ -265,8 +266,46 @@ export async function fetchMonsterImageFromDb(pool, monsterId) {
   }
 }
 
-async function fetchMonsterThumbnailFromDb(pool, monsterId) {
+const THUMB_EDGE = 96;
+
+function isDisplayableImage(image) {
+  if (!image?.buffer?.length) return false;
+  const type = String(image.contentType || '').toLowerCase();
+  return type === 'image/png' || type === 'image/jpeg' || type === 'image/webp' || type === 'image/gif';
+}
+
+async function shrinkToThumbnail(image) {
+  if (!image?.buffer?.length) return null;
+  try {
+    const buffer = await sharp(image.buffer)
+      .rotate()
+      .resize({ width: THUMB_EDGE, height: THUMB_EDGE, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 70 })
+      .toBuffer();
+    return {
+      buffer,
+      contentType: 'image/jpeg',
+      byteLength: buffer.length
+    };
+  } catch (err) {
+    console.warn('Thumbnail resize failed:', err.message);
+    return isDisplayableImage(image) ? image : null;
+  }
+}
+
+async function loadGridThumbnail(pool, monsterId) {
   const thumbnail = await fetchMonsterImageById(pool, monsterId, IMAGE_COLUMNS.MonsterThumbnail);
+  if (isDisplayableImage(thumbnail)) {
+    return thumbnail;
+  }
+
+  const full = await fetchMonsterImageById(pool, monsterId, IMAGE_COLUMNS.MonsterImage);
+  if (!full) return null;
+  return shrinkToThumbnail(full);
+}
+
+async function fetchMonsterThumbnailFromDb(pool, monsterId) {
+  const thumbnail = await loadGridThumbnail(pool, monsterId);
   if (thumbnail) {
     return thumbnail;
   }
@@ -277,7 +316,7 @@ async function fetchMonsterThumbnailFromDb(pool, monsterId) {
       return null;
     }
 
-    return fetchMonsterImageById(pool, relatedId, IMAGE_COLUMNS.MonsterThumbnail);
+    return loadGridThumbnail(pool, relatedId);
   } catch (err) {
     console.warn('Related monster thumbnail fetch failed:', err.message);
     return null;

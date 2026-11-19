@@ -4327,17 +4327,19 @@ function splitEntityFields(record) {
 function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) {
   const { artEnabled } = useArt();
   const [failed, setFailed] = useState(false);
+  const [src, setSrc] = useState(imageUrl);
   const emptyFrame = className.includes('detailArt')
     ? <div className="noArt" aria-hidden="true" />
     : <span className="artFrame" aria-hidden="true" />;
 
   useEffect(() => {
     setFailed(false);
+    setSrc(imageUrl);
   }, [imageUrl]);
 
   if (!artEnabled) return emptyFrame;
 
-  if (!imageUrl || failed) {
+  if (!src || failed) {
     return className.includes('detailArt')
       ? <div className="noArt"><ImageIcon size={size} /></div>
       : <ImageIcon size={size} className={className} />;
@@ -4346,11 +4348,18 @@ function MonsterArtThumbnail({ imageUrl, alt = '', size = 18, className = '' }) 
   return (
     <img
       className={className}
-      src={imageUrl}
+      src={src}
       alt={alt}
       loading="lazy"
       decoding="async"
-      onError={() => setFailed(true)}
+      onError={() => {
+        const full = typeof imageUrl === 'string' ? imageUrl.replace('/image/thumb', '/image') : '';
+        if (full && full !== src) {
+          setSrc(full);
+          return;
+        }
+        setFailed(true);
+      }}
     />
   );
 }

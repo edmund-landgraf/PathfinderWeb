@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,18 +85,70 @@ function sortEntries(entries) {
   });
 }
 
+function utilitiesRepoCandidates() {
+  return [
+    process.env.UTILITIES_REPO_PATH,
+    join(homedir(), 'node-sites', 'PathfinderUtilities')
+  ].filter(Boolean);
+}
+
+function readUtilitiesGitEntries() {
+  for (const dir of utilitiesRepoCandidates()) {
+    try {
+      execSync('git -c safe.directory=* rev-parse --is-inside-work-tree', {
+        cwd: dir,
+        stdio: 'ignore'
+      });
+      try {
+        execSync('git -c safe.directory=* fetch --quiet origin main', {
+          cwd: dir,
+          stdio: 'ignore'
+        });
+      } catch (error) {
+        console.warn(`Could not fetch PathfinderUtilities in ${dir}: ${error.message}`);
+      }
+
+      const output = execSync(
+        'git -c safe.directory=* log origin/main --format="%ad|%s" --date=short',
+        { cwd: dir, encoding: 'utf8' }
+      );
+
+      return output
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const separator = line.indexOf('|');
+          return {
+            date: line.slice(0, separator),
+            comment: line.slice(separator + 1).trim()
+          };
+        })
+        .filter((entry) => entry.date && entry.comment);
+    } catch {
+      // Try the next checkout, then the GitHub API.
+    }
+  }
+
+  return null;
+}
+
 async function readUtilitiesEntries() {
+  const gitEntries = readUtilitiesGitEntries();
+  if (gitEntries) return gitEntries;
+
   const entries = [];
   let page = 1;
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'pf2-monster-search-updates'
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   while (page <= 20) {
     const url = `https://api.github.com/repos/${utilitiesRepo}/commits?per_page=100&page=${page}`;
-    const response = await fetch(url, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'pf2-monster-search-updates'
-      }
-    });
+    const response = await fetch(url, { headers });
 
     if (!response.ok) {
       console.warn(`Could not read GitHub commits (${response.status}) for ${utilitiesRepo}`);
