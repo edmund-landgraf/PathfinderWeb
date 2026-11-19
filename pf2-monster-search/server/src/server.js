@@ -2275,17 +2275,14 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       : `
       SELECT *
       FROM (
-        ${sourceSystemSql}
-      ) creatures
-      ${whereSql}
+        SELECT creatures.*, COUNT(*) OVER() AS TotalCount
+        FROM (
+          ${sourceSystemSql}
+        ) creatures
+        ${whereSql}
+      ) counted
       ORDER BY ${orderBySql}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
-
-      SELECT COUNT(*) AS Total
-      FROM (
-        ${sourceSystemSql}
-      ) creatures
-      ${whereSql};
     `;
 
     logValue('WHERE:', where);
@@ -2296,7 +2293,18 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     const result = await request.query(query);
 
     let rows = result.recordsets?.[0] || [];
-    let total = result.recordsets?.[1]?.[0]?.Total || 0;
+    let total = Number(rows[0]?.TotalCount) || 0;
+    if (!missingArt && rows.length === 0 && offset > 0) {
+      const countResult = await request.query(`
+        SELECT COUNT(*) AS Total
+        FROM (
+          ${sourceSystemSql}
+        ) creatures
+        ${whereSql};
+      `);
+      total = countResult.recordset?.[0]?.Total || 0;
+    }
+    rows = rows.map(({ TotalCount, ...row }) => row);
 
     if (missingArt) {
       // Own-image rows are already excluded in SQL. Drop creatures that still
