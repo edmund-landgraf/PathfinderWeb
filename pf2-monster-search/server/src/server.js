@@ -1977,9 +1977,62 @@ app.get('/api/spells', async (req, res) => {
   }
 });
 
-function buildCreatureSourceSql({ includeRaw = true } = {}) {
+const CREATURE_TEXT_COLUMNS = [
+  'Senses',
+  'Languages',
+  'Skills',
+  'Items',
+  'Immunities',
+  'Resistances',
+  'Weaknesses',
+  'Speed'
+];
+
+const CANON_GAME_SYSTEM_EXPR = `
+  CASE
+    WHEN sb.Name = N'Alien Core'
+      OR sb.Name LIKE N'Alien Core,%'
+      OR sb.Name LIKE N'%, Alien Core'
+      OR sb.Name LIKE N'%, Alien Core,%'
+      OR sb.Name LIKE N'%Starfinder%'
+    THEN N'SF2'
+    ELSE N'PF2'
+  END`;
+
+let canonGameSystemExprPromise;
+
+function canonGameSystemExpr(pool) {
+  if (!canonGameSystemExprPromise) {
+    canonGameSystemExprPromise = pool.request().query(`
+      SELECT COL_LENGTH(N'pf2.Monster', N'GameSystem') AS len;
+    `).then((result) => (
+      result.recordset?.[0]?.len == null ? CANON_GAME_SYSTEM_EXPR : 'm.GameSystem'
+    ));
+  }
+  return canonGameSystemExprPromise;
+}
+
+function creatureTextSelect(alias, columns) {
+  return columns.map((column) => `${alias}.${column},`).join('\n        ');
+}
+
+function buildCreatureSourceSql({
+  includeRaw = true,
+  textColumns = CREATURE_TEXT_COLUMNS,
+  canonWhere = [],
+  userWhere = [],
+  gameSystemExpr = CANON_GAME_SYSTEM_EXPR,
+  touchUserImage = true
+} = {}) {
   const canonRawSql = includeRaw ? 'm.RawMD,' : '';
   const userRawSql = includeRaw ? 'um.RawMD,' : '';
+  const canonTextSql = creatureTextSelect('ms', textColumns);
+  const userTextSql = creatureTextSelect('um', textColumns);
+  const userImageSql = touchUserImage
+    ? `CASE WHEN um.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', um.UserMonsterId, N'/image/thumb') END`
+    : 'CAST(NULL AS nvarchar(400))';
+  const canonWhereSql = canonWhere.length ? `WHERE ${canonWhere.join(' AND ')}` : '';
+  const userWhereSql = userWhere.length ? `WHERE ${userWhere.join(' AND ')}` : '';
 
   return `
       SELECT
@@ -2003,10 +2056,7 @@ function buildCreatureSourceSql({ includeRaw = true } = {}) {
         m.IsNPC,
         m.ImageUrl,
         ms.Perception,
-        ms.Senses,
-        ms.Languages,
-        ms.Skills,
-        ms.Items,
+        ${canonTextSql}
         ms.StrMod,
         ms.DexMod,
         ms.ConMod,
@@ -2018,20 +2068,8 @@ function buildCreatureSourceSql({ includeRaw = true } = {}) {
         ms.Reflex,
         ms.Will,
         ms.HP,
-        ms.Immunities,
-        ms.Resistances,
-        ms.Weaknesses,
-        ms.Speed,
         ${canonRawSql}
-        CASE
-          WHEN sb.Name = N'Alien Core'
-            OR sb.Name LIKE N'Alien Core,%'
-            OR sb.Name LIKE N'%, Alien Core'
-            OR sb.Name LIKE N'%, Alien Core,%'
-            OR sb.Name LIKE N'%Starfinder%'
-          THEN N'SF2'
-          ELSE N'PF2'
-        END AS GameSystem,
+        ${gameSystemExpr} AS GameSystem,
         N'canon' AS ContentType,
         N'canon' AS SourceType,
         CAST(NULL AS int) AS UserMonsterId
@@ -2048,6 +2086,7 @@ function buildCreatureSourceSql({ includeRaw = true } = {}) {
         ON m.SourceBookId = sb.SourceBookId
       LEFT JOIN pf2.MonsterStats ms
         ON m.MonsterId = ms.MonsterId
+      ${canonWhereSql}
 
       UNION ALL
 
@@ -2070,12 +2109,9 @@ function buildCreatureSourceSql({ includeRaw = true } = {}) {
         um.SourcePage,
         um.IsUnique,
         um.IsNPC,
-        CASE WHEN um.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-monsters/', um.UserMonsterId, N'/image/thumb') END AS ImageUrl,
+        ${userImageSql} AS ImageUrl,
         um.Perception,
-        um.Senses,
-        um.Languages,
-        um.Skills,
-        um.Items,
+        ${userTextSql}
         um.StrMod,
         um.DexMod,
         um.ConMod,
@@ -2087,27 +2123,56 @@ function buildCreatureSourceSql({ includeRaw = true } = {}) {
         um.Reflex,
         um.Will,
         um.HP,
-        um.Immunities,
-        um.Resistances,
-        um.Weaknesses,
-        um.Speed,
         ${userRawSql}
         um.GameSystem,
         um.ContentType,
         N'my monsters' AS SourceType,
         um.UserMonsterId
       FROM pf2.UserMonster um
+      ${userWhereSql}
   `;
+}
+
+async function hydrateCreaturePage(request, keys, gameSystemExpr) {
+  const canonIds = [];
+  const userIds = [];
+  for (const key of keys) {
+    const id = Number(key.MonsterId);
+    if (id > 0) canonIds.push(id);
+    else if (id < 0) userIds.push(-id);
+  }
+  canonIds.forEach((id, index) => request.input(`canonPageId${index}`, sql.Int, id));
+  userIds.forEach((id, index) => request.input(`userPageId${index}`, sql.Int, id));
+  const canonIn = canonIds.length
+    ? `m.MonsterId IN (${canonIds.map((_, index) => `@canonPageId${index}`).join(', ')})`
+    : '1 = 0';
+  const userIn = userIds.length
+    ? `um.UserMonsterId IN (${userIds.map((_, index) => `@userPageId${index}`).join(', ')})`
+    : '1 = 0';
+  const hydrated = await request.query(`
+    SELECT *
+    FROM (
+      ${buildCreatureSourceSql({
+        includeRaw: false,
+        gameSystemExpr,
+        canonWhere: [canonIn],
+        userWhere: [userIn]
+      })}
+    ) creatures;
+  `);
+  const byId = new Map((hydrated.recordset || []).map((row) => [row.MonsterId, row]));
+  return keys.map((key) => byId.get(key.MonsterId)).filter(Boolean);
 }
 
 async function fetchCreatureByMonsterId(pool, monsterId) {
   await ensureUserMonsterSchema(pool);
+  const gameSystemExpr = await canonGameSystemExpr(pool);
   const result = await pool.request()
     .input('monsterId', sql.Int, monsterId)
     .query(`
       SELECT TOP 1 *
       FROM (
-        ${buildCreatureSourceSql()}
+        ${buildCreatureSourceSql({ gameSystemExpr })}
       ) creatures
       WHERE MonsterId = @monsterId;
     `);
@@ -2261,7 +2326,103 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
     };
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const sourceSystemSql = buildCreatureSourceSql({ includeRaw: false });
+    const gameSystemExpr = await canonGameSystemExpr(pool);
+    const applied = (key) => debugParams[key] && !debugParams[key].skipped;
+    const canonWhere = ['m.IsNPC = @isNpcFilter'];
+    const userWhere = ['um.IsNPC = @isNpcFilter'];
+    if (applied('name')) {
+      canonWhere.push('m.Name LIKE @name');
+      userWhere.push('um.Name LIKE @name');
+    }
+    if (applied('nameStartsWith')) {
+      canonWhere.push('m.Name LIKE @nameStartsWith');
+      userWhere.push('um.Name LIKE @nameStartsWith');
+    }
+    if (applied('levelMin')) {
+      canonWhere.push('m.Level >= @levelMin');
+      userWhere.push('um.Level >= @levelMin');
+    }
+    if (applied('levelMax')) {
+      canonWhere.push('m.Level <= @levelMax');
+      userWhere.push('um.Level <= @levelMax');
+    }
+    if (applied('rarity')) {
+      canonWhere.push('r.Name = @rarity');
+      userWhere.push('um.Rarity = @rarity');
+    }
+    if (applied('size')) {
+      canonWhere.push('sz.Name = @size');
+      userWhere.push('um.Size = @size');
+    }
+    if (applied('alignment')) {
+      canonWhere.push('a.Name = @alignment');
+      userWhere.push('um.Alignment = @alignment');
+    }
+    if (applied('family')) {
+      canonWhere.push('f.Name LIKE @family');
+      userWhere.push('um.Family LIKE @family');
+    }
+    if (applied('sourceBook')) {
+      canonWhere.push('sb.Name LIKE @sourceBook');
+      userWhere.push('um.SourceBook LIKE @sourceBook');
+    }
+    if (applied('gameSystem')) {
+      canonWhere.push(`${gameSystemExpr} = @gameSystem`);
+      userWhere.push('um.GameSystem = @gameSystem');
+    }
+    if (applied('text')) {
+      canonWhere.push(`m.MonsterId IN (
+        SELECT MonsterId FROM pf2.Monster WHERE CONTAINS((Name, RawText), @text)
+      )`);
+      userWhere.push(`(
+        um.Name LIKE @textLike
+        OR um.UserMonsterId IN (
+          SELECT UserMonsterId FROM pf2.UserMonster WHERE RawMD LIKE @textLike
+        )
+      )`);
+    }
+    if (applied('isUnique')) {
+      canonWhere.push('m.IsUnique = @isUnique');
+      userWhere.push('um.IsUnique = @isUnique');
+    }
+    if (applied('hpMin')) {
+      canonWhere.push('ms.HP >= @hpMin');
+      userWhere.push('um.HP >= @hpMin');
+    }
+    if (applied('hpMax')) {
+      canonWhere.push('ms.HP <= @hpMax');
+      userWhere.push('um.HP <= @hpMax');
+    }
+    if (applied('acMin')) {
+      canonWhere.push('ms.AC >= @acMin');
+      userWhere.push('um.AC >= @acMin');
+    }
+    if (applied('acMax')) {
+      canonWhere.push('ms.AC <= @acMax');
+      userWhere.push('um.AC <= @acMax');
+    }
+    if (applied('contentType')) {
+      if (debugParams.contentType.value === 'canon') userWhere.push('1 = 0');
+      else canonWhere.push('1 = 0');
+    }
+    for (const column of CREATURE_TEXT_COLUMNS) {
+      const key = column.charAt(0).toLowerCase() + column.slice(1);
+      if (!applied(key)) continue;
+      canonWhere.push(`ms.${column} LIKE @${key}`);
+      userWhere.push(`um.${column} LIKE @${key}`);
+    }
+    const textColumns = CREATURE_TEXT_COLUMNS.filter((column) => {
+      const key = column.charAt(0).toLowerCase() + column.slice(1);
+      return applied(key);
+    });
+    const sourceSystemSql = buildCreatureSourceSql({
+      includeRaw: false,
+      textColumns: missingArt ? CREATURE_TEXT_COLUMNS : textColumns,
+      canonWhere,
+      userWhere,
+      gameSystemExpr,
+      touchUserImage: missingArt
+    });
 
     const query = missingArt
       ? `
@@ -2305,6 +2466,9 @@ async function queryCreatures(req, res, { routeLabel, npcMode }) {
       total = countResult.recordset?.[0]?.Total || 0;
     }
     rows = rows.map(({ TotalCount, ...row }) => row);
+    if (!missingArt && rows.length) {
+      rows = await hydrateCreaturePage(request, rows, gameSystemExpr);
+    }
 
     if (missingArt) {
       // Own-image rows are already excluded in SQL. Drop creatures that still
