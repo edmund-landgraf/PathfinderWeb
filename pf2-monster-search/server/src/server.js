@@ -1603,6 +1603,8 @@ app.get('/api/equipment', async (req, res) => {
       await sendUserEquipmentSearch(req, res, pool, started);
       return;
     }
+    const includeUserEquipment = requestedContentType !== 'canon';
+    if (includeUserEquipment) await ensureUserEquipmentSchema(pool);
 
     const request = pool.request();
 
@@ -1710,7 +1712,159 @@ app.get('/api/equipment', async (req, res) => {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const query = `
+    const userWhere = [];
+    const appliedFilter = (key) => debugParams[key] && !debugParams[key].skipped;
+    if (includeUserEquipment) {
+      if (appliedFilter('name')) userWhere.push('ue.Name LIKE @name');
+      if (appliedFilter('nameStartsWith')) userWhere.push('ue.Name LIKE @nameStartsWith');
+      if (appliedFilter('levelMin')) userWhere.push('ue.Level >= @levelMin');
+      if (appliedFilter('levelMax')) userWhere.push('ue.Level <= @levelMax');
+      if (appliedFilter('equipmentType')) userWhere.push('ue.ItemCategory LIKE @equipmentType');
+      if (appliedFilter('searchCategory')) userWhere.push('ue.ItemCategory LIKE @searchCategory');
+      if (appliedFilter('itemCategory')) userWhere.push('ue.ItemCategory LIKE @itemCategory');
+      if (appliedFilter('rarity')) userWhere.push('ue.Rarity = @rarity');
+      if (appliedFilter('price')) userWhere.push('ue.PriceText LIKE @price');
+      if (appliedFilter('bulk')) userWhere.push('ue.BulkText LIKE @bulk');
+      if (appliedFilter('trait')) userWhere.push(`ue.Traits LIKE N'%' + @trait + N'%'`);
+      if (appliedFilter('text')) {
+        const textLike = `%${String(req.query.text).trim()}%`;
+        request.input('textLike', sql.NVarChar, textLike);
+        userWhere.push('(ue.Name LIKE @textLike OR ue.Description LIKE @textLike OR ue.Traits LIKE @textLike)');
+      }
+      const canonOnly = [
+        'itemSubcategory', 'sourceBook', 'pfs', 'weaponCategory', 'weaponGroup', 'weaponType',
+        'damageType', 'armorCategory', 'priceMin', 'priceMax'
+      ];
+      if (canonOnly.some((key) => appliedFilter(key))) userWhere.push('1 = 0');
+    }
+    const userWhereSql = userWhere.length ? `WHERE ${userWhere.join(' AND ')}` : '';
+    const includeSortColumn = {
+      Name: 'Name',
+      Level: 'Level',
+      EquipmentType: 'EquipmentType',
+      SearchCategory: 'SearchCategory',
+      ItemCategory: 'ItemCategory',
+      ItemSubcategory: 'ItemSubcategory',
+      Rarity: 'Rarity',
+      SourceBook: 'SourceBook',
+      Traits: 'Traits',
+      PriceCp: 'PriceCp',
+      BulkValue: 'BulkValue',
+      WeaponCategory: 'WeaponCategory',
+      ArmorCategory: 'ArmorCategory'
+    }[sortBy] || 'Name';
+    const pagedOrderSql = includeUserEquipment
+      ? (includeSortColumn === 'Name'
+        ? `Name ${sortDir}, EquipmentId ASC`
+        : `${includeSortColumn} ${sortDir}, Name ASC, EquipmentId ASC`)
+      : orderBySql;
+
+    const userListSql = `
+      SELECT
+        -ue.UserEquipmentId AS EquipmentId,
+        CAST(NULL AS int) AS AonId,
+        CAST(NULL AS nvarchar(255)) AS AonKey,
+        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        ue.Name,
+        ue.Level,
+        ue.ItemCategory AS EquipmentType,
+        CAST(NULL AS nvarchar(255)) AS SearchCategory,
+        ue.ItemCategory,
+        CAST(NULL AS nvarchar(255)) AS ItemSubcategory,
+        ue.Rarity,
+        CAST(NULL AS nvarchar(255)) AS SourceBook,
+        CAST(NULL AS nvarchar(2048)) AS SourcePurchaseURL,
+        CAST(NULL AS int) AS SourcePage,
+        ue.Traits,
+        CAST(NULL AS nvarchar(100)) AS PFS,
+        CAST(NULL AS int) AS PriceCp,
+        ue.PriceText,
+        CAST(NULL AS decimal(18, 4)) AS BulkValue,
+        ue.BulkText,
+        ue.Description AS Summary,
+        CAST(NULL AS nvarchar(255)) AS RemasterId,
+        CAST(NULL AS nvarchar(max)) AS BaseItemText,
+        CAST(NULL AS nvarchar(max)) AS SpellText,
+        CAST(NULL AS nvarchar(max)) AS StageText,
+        CAST(NULL AS nvarchar(255)) AS WeaponCategory,
+        CAST(NULL AS nvarchar(255)) AS WeaponGroup,
+        CAST(NULL AS nvarchar(255)) AS WeaponType,
+        CAST(NULL AS nvarchar(255)) AS Damage,
+        CAST(NULL AS int) AS DamageDie,
+        CAST(NULL AS nvarchar(255)) AS DamageType,
+        CAST(NULL AS nvarchar(50)) AS Hands,
+        CAST(NULL AS nvarchar(max)) AS AmmunitionText,
+        CAST(NULL AS nvarchar(255)) AS ArmorCategory,
+        CAST(NULL AS nvarchar(max)) AS ArmorGroupText,
+        CAST(NULL AS int) AS AC,
+        CAST(NULL AS int) AS Hardness,
+        CAST(NULL AS nvarchar(255)) AS HardnessText,
+        CAST(NULL AS int) AS HP,
+        CAST(NULL AS nvarchar(255)) AS HPText,
+        ue.ContentType
+      FROM pf2.UserEquipment ue
+      ${userWhereSql}
+    `;
+
+    const query = includeUserEquipment ? `
+      SELECT *
+      FROM (
+        SELECT
+          e.EquipmentId,
+          e.AonId,
+          e.AonKey,
+          e.AonUrl,
+          e.Name,
+          e.Level,
+          e.EquipmentType,
+          e.SearchCategory,
+          e.ItemCategory,
+          e.ItemSubcategory,
+          r.Name AS Rarity,
+          sources.SourceBook,
+          sources.SourcePurchaseURL,
+          e.SourcePage,
+          traits.Traits,
+          e.PFS,
+          e.PriceCp,
+          e.PriceText,
+          e.BulkValue,
+          e.BulkText,
+          e.Summary,
+          e.RemasterId,
+          e.BaseItemText,
+          e.SpellText,
+          e.StageText,
+          e.WeaponCategory,
+          e.WeaponGroup,
+          e.WeaponType,
+          e.Damage,
+          e.DamageDie,
+          e.DamageType,
+          e.Hands,
+          e.AmmunitionText,
+          e.ArmorCategory,
+          e.ArmorGroupText,
+          e.AC,
+          e.Hardness,
+          e.HardnessText,
+          e.HP,
+          e.HPText,
+          N'canon' AS ContentType
+        ${fromSql}
+        ${whereSql}
+
+        UNION ALL
+
+        ${userListSql}
+      ) equipment
+      ORDER BY ${pagedOrderSql}
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+
+      SELECT
+        (SELECT COUNT(*) ${countFromSql} ${whereSql})
+        + (SELECT COUNT(*) FROM pf2.UserEquipment ue ${userWhereSql}) AS Total;
+    ` : `
       SELECT
         e.EquipmentId,
         e.AonId,

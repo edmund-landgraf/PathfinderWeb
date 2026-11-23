@@ -305,6 +305,7 @@ const emptyEquipmentFilters = {
   damageType: '',
   armorCategory: '',
   nameStartsWith: '',
+  contentType: '',
   limit: '100'
 };
 
@@ -2227,6 +2228,17 @@ function EquipmentPage({ onNavigate }) {
             <Field label="Rarity"><SelectInput value={filters.rarity} onChange={v => setFilter('rarity', v)} options={lookups.rarity} /></Field>
             <Field label="Trait"><SelectInput value={filters.trait} onChange={v => setFilter('trait', v)} options={lookups.trait} /></Field>
             <Field label="Source"><TextInput value={filters.sourceBook} onChange={v => setFilter('sourceBook', v)} placeholder="Player Core" /></Field>
+            <Field label="My equipment">
+              <SegmentedInput
+                value={filters.contentType}
+                onChange={v => setFilter('contentType', v)}
+                options={[
+                  { value: '', label: 'Include' },
+                  { value: 'user generated', label: 'Only mine' },
+                  { value: 'canon', label: 'Canon only' }
+                ]}
+              />
+            </Field>
             <Field label="PFS"><TextInput value={filters.pfs} onChange={v => setFilter('pfs', v)} /></Field>
 
             <Field label="Price text"><TextInput value={filters.price} onChange={v => setFilter('price', v)} /></Field>
