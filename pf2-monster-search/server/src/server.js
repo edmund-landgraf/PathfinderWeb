@@ -294,6 +294,179 @@ function ensureUserMonsterSchema(pool) {
   return userMonsterSchemaPromise;
 }
 
+let userEquipmentSchemaPromise;
+
+function ensureUserEquipmentSchema(pool) {
+  if (!userEquipmentSchemaPromise) {
+    userEquipmentSchemaPromise = pool.request().query(`
+      IF OBJECT_ID(N'pf2.UserEquipment', N'U') IS NULL
+      BEGIN
+        CREATE TABLE pf2.UserEquipment (
+          UserEquipmentId int IDENTITY(1,1) NOT NULL CONSTRAINT PK_UserEquipment PRIMARY KEY,
+          ContentType nvarchar(30) NOT NULL CONSTRAINT DF_UserEquipment_ContentType DEFAULT N'user generated',
+          Name nvarchar(255) NOT NULL,
+          Level int NULL,
+          Rarity nvarchar(100) NULL,
+          PriceText nvarchar(200) NULL,
+          BulkText nvarchar(100) NULL,
+          Usage nvarchar(200) NULL,
+          Description nvarchar(max) NULL,
+          Traits nvarchar(max) NULL,
+          ItemCategory nvarchar(255) NULL,
+          CreatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserEquipment_CreatedAt DEFAULT SYSUTCDATETIME(),
+          UpdatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserEquipment_UpdatedAt DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT CK_UserEquipment_ContentType CHECK (ContentType IN (N'user generated'))
+        );
+      END;
+    `).catch((err) => {
+      userEquipmentSchemaPromise = null;
+      throw err;
+    });
+  }
+
+  return userEquipmentSchemaPromise;
+}
+
+function equipmentDetailSql(source) {
+  if (source === 'user') {
+    return `
+      SELECT
+        -ue.UserEquipmentId AS EquipmentId,
+        CAST(NULL AS int) AS AonId,
+        CAST(NULL AS nvarchar(255)) AS AonKey,
+        CAST(NULL AS nvarchar(2048)) AS AonUrl,
+        ue.Name,
+        ue.Level,
+        ue.ItemCategory AS EquipmentType,
+        CAST(NULL AS nvarchar(255)) AS SearchCategory,
+        ue.ItemCategory,
+        CAST(NULL AS nvarchar(255)) AS ItemSubcategory,
+        CAST(NULL AS int) AS RarityId,
+        CAST(NULL AS int) AS SourceBookId,
+        CAST(NULL AS int) AS SourcePage,
+        CAST(NULL AS nvarchar(100)) AS PFS,
+        CAST(NULL AS int) AS PriceCp,
+        ue.PriceText,
+        CAST(NULL AS decimal(18, 4)) AS BulkValue,
+        ue.BulkText,
+        ue.Description AS Summary,
+        CAST(NULL AS nvarchar(255)) AS RemasterId,
+        CAST(NULL AS nvarchar(max)) AS BaseItemText,
+        CAST(NULL AS nvarchar(max)) AS SpellText,
+        CAST(NULL AS nvarchar(max)) AS StageText,
+        CAST(NULL AS nvarchar(255)) AS WeaponCategory,
+        CAST(NULL AS nvarchar(255)) AS WeaponGroup,
+        CAST(NULL AS nvarchar(255)) AS WeaponType,
+        CAST(NULL AS nvarchar(255)) AS Damage,
+        CAST(NULL AS int) AS DamageDie,
+        CAST(NULL AS nvarchar(255)) AS DamageType,
+        CAST(NULL AS nvarchar(50)) AS Hands,
+        CAST(NULL AS nvarchar(max)) AS AmmunitionText,
+        CAST(NULL AS nvarchar(255)) AS ArmorCategory,
+        CAST(NULL AS nvarchar(max)) AS ArmorGroupText,
+        CAST(NULL AS int) AS AC,
+        CAST(NULL AS int) AS Hardness,
+        CAST(NULL AS nvarchar(255)) AS HardnessText,
+        CAST(NULL AS int) AS HP,
+        CAST(NULL AS nvarchar(255)) AS HPText,
+        CAST(NULL AS nvarchar(max)) AS RawHtml,
+        ue.Description AS RawText,
+        CAST(NULL AS nvarchar(max)) AS RawJson,
+        ue.CreatedAt,
+        ue.UpdatedAt,
+        CAST(NULL AS datetime2(0)) AS LastScraped,
+        CAST(NULL AS nvarchar(50)) AS ScrapeVersion,
+        ue.Description AS RawMD,
+        ue.ContentType,
+        ue.Rarity,
+        ue.Usage,
+        ue.Traits
+      FROM pf2.UserEquipment ue
+      WHERE ue.UserEquipmentId = @userEquipmentId
+    `;
+  }
+
+  return `
+    SELECT
+      e.*,
+      N'canon' AS ContentType,
+      r.Name AS Rarity,
+      CAST(NULL AS nvarchar(200)) AS Usage,
+      traits.Traits
+    FROM pf2.Equipment e
+    LEFT JOIN pf2.Rarity r
+      ON r.RarityId = e.RarityId
+    OUTER APPLY (
+      SELECT STRING_AGG(t.Name, ', ') AS Traits
+      FROM pf2.EquipmentTrait et
+      INNER JOIN pf2.Trait t
+        ON t.TraitId = et.TraitId
+      WHERE et.EquipmentId = e.EquipmentId
+    ) traits
+    WHERE e.EquipmentId = @equipmentId
+  `;
+}
+
+async function fetchEquipmentById(pool, equipmentId) {
+  if (equipmentId < 0) {
+    await ensureUserEquipmentSchema(pool);
+    const result = await pool.request()
+      .input('userEquipmentId', sql.Int, -equipmentId)
+      .query(equipmentDetailSql('user'));
+    return result.recordset?.[0] || null;
+  }
+
+  const result = await pool.request()
+    .input('equipmentId', sql.Int, equipmentId)
+    .query(equipmentDetailSql('canon'));
+  return result.recordset?.[0] || null;
+}
+
+function buildUserEquipmentPayload(body) {
+  const name = cleanString(body?.name ?? body?.Name, 255);
+  if (!name) {
+    const err = new Error('Name is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return {
+    name,
+    level: cleanInt(body?.level ?? body?.Level, 'Level'),
+    rarity: cleanString(body?.rarity ?? body?.Rarity, 100),
+    priceText: cleanString(body?.price ?? body?.priceText ?? body?.Price ?? body?.PriceText, 200),
+    bulkText: cleanString(body?.bulk ?? body?.bulkText ?? body?.Bulk ?? body?.BulkText, 100),
+    usage: cleanString(body?.usage ?? body?.Usage, 200),
+    description: cleanString(body?.description ?? body?.Description ?? body?.summary ?? body?.Summary, 100000),
+    traits: cleanString(body?.traits ?? body?.Traits, 8000),
+    itemCategory: cleanString(body?.category ?? body?.itemCategory ?? body?.Category ?? body?.ItemCategory, 255)
+  };
+}
+
+async function insertUserEquipment(pool, payload) {
+  const result = await pool.request()
+    .input('name', sql.NVarChar(255), payload.name)
+    .input('level', sql.Int, payload.level)
+    .input('rarity', sql.NVarChar(100), payload.rarity)
+    .input('priceText', sql.NVarChar(200), payload.priceText)
+    .input('bulkText', sql.NVarChar(100), payload.bulkText)
+    .input('usage', sql.NVarChar(200), payload.usage)
+    .input('description', sql.NVarChar(sql.MAX), payload.description)
+    .input('traits', sql.NVarChar(sql.MAX), payload.traits)
+    .input('itemCategory', sql.NVarChar(255), payload.itemCategory)
+    .query(`
+      INSERT INTO pf2.UserEquipment (
+        Name, Level, Rarity, PriceText, BulkText, Usage, Description, Traits, ItemCategory
+      )
+      OUTPUT INSERTED.UserEquipmentId
+      VALUES (
+        @name, @level, @rarity, @priceText, @bulkText, @usage, @description, @traits, @itemCategory
+      );
+    `);
+
+  return result.recordset?.[0]?.UserEquipmentId;
+}
+
 function cleanString(value, maxLength = 4000) {
   if (value === undefined || value === null) return null;
   const clean = String(value).trim();
@@ -1288,6 +1461,135 @@ app.get('/api/equipment-lookups', async (_req, res) => {
   }
 });
 
+async function sendUserEquipmentSearch(req, res, pool, started) {
+  await ensureUserEquipmentSchema(pool);
+  const request = pool.request();
+  const where = [];
+  const debugParams = {};
+
+  addStringFilter(request, where, debugParams, 'ue.Name', 'name', req.query.name);
+  addNameStartsWithFilter(request, where, debugParams, 'ue.Name', req.query.nameStartsWith);
+  addIntFilter(request, where, debugParams, 'ue.Level', 'levelMin', req.query.levelMin, '>=');
+  addIntFilter(request, where, debugParams, 'ue.Level', 'levelMax', req.query.levelMax, '<=');
+  addStringFilter(request, where, debugParams, 'ue.ItemCategory', 'equipmentType', req.query.equipmentType);
+  addStringFilter(request, where, debugParams, 'ue.ItemCategory', 'searchCategory', req.query.searchCategory);
+  addStringFilter(request, where, debugParams, 'ue.ItemCategory', 'itemCategory', req.query.itemCategory);
+  addStringFilter(request, where, debugParams, 'ue.Rarity', 'rarity', req.query.rarity, true);
+  addStringFilter(request, where, debugParams, 'ue.PriceText', 'price', req.query.price);
+  addStringFilter(request, where, debugParams, 'ue.BulkText', 'bulk', req.query.bulk);
+  addStringFilter(request, where, debugParams, 'ue.Traits', 'trait', req.query.trait);
+
+  if (req.query.text !== undefined && req.query.text !== null && String(req.query.text).trim() !== '') {
+    const clean = String(req.query.text).trim();
+    request.input('textLike', sql.NVarChar, `%${clean}%`);
+    where.push('(ue.Name LIKE @textLike OR ue.Description LIKE @textLike OR ue.Traits LIKE @textLike)');
+    debugParams.text = { type: 'NVarChar', value: `%${clean}%`, column: 'Name, Description, Traits' };
+  }
+
+  const canonOnly = [
+    'itemSubcategory', 'sourceBook', 'pfs', 'weaponCategory', 'weaponGroup', 'weaponType',
+    'damageType', 'armorCategory', 'priceMin', 'priceMax'
+  ];
+  if (canonOnly.some((key) => String(req.query[key] ?? '').trim() !== '')) {
+    where.push('1 = 0');
+  }
+
+  const { limit, offset } = parsePage(req.query);
+  const sortBy = normalizeEquipmentSortBy(req.query.sortBy);
+  const sortDir = normalizeSortDir(req.query.sortDir);
+  const sortExpressions = {
+    Name: 'ue.Name',
+    Level: 'ue.Level',
+    EquipmentType: 'ue.ItemCategory',
+    SearchCategory: 'ue.ItemCategory',
+    ItemCategory: 'ue.ItemCategory',
+    ItemSubcategory: 'ue.Name',
+    Rarity: 'ue.Rarity',
+    SourceBook: 'ue.Name',
+    Traits: 'ue.Traits',
+    PriceCp: 'ue.PriceText',
+    BulkValue: 'ue.BulkText',
+    WeaponCategory: 'ue.Name',
+    ArmorCategory: 'ue.Name'
+  };
+  const expression = sortExpressions[sortBy] || 'ue.Name';
+  const orderBySql = sortBy === 'Name'
+    ? `${expression} ${sortDir}, ue.UserEquipmentId ASC`
+    : `${expression} ${sortDir}, ue.Name ASC, ue.UserEquipmentId ASC`;
+
+  request.input('limit', sql.Int, limit);
+  request.input('offset', sql.Int, offset);
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const query = `
+    SELECT
+      -ue.UserEquipmentId AS EquipmentId,
+      CAST(NULL AS int) AS AonId,
+      CAST(NULL AS nvarchar(255)) AS AonKey,
+      CAST(NULL AS nvarchar(2048)) AS AonUrl,
+      ue.Name,
+      ue.Level,
+      ue.ItemCategory AS EquipmentType,
+      CAST(NULL AS nvarchar(255)) AS SearchCategory,
+      ue.ItemCategory,
+      CAST(NULL AS nvarchar(255)) AS ItemSubcategory,
+      ue.Rarity,
+      CAST(NULL AS nvarchar(255)) AS SourceBook,
+      CAST(NULL AS nvarchar(2048)) AS SourcePurchaseURL,
+      CAST(NULL AS int) AS SourcePage,
+      ue.Traits,
+      CAST(NULL AS nvarchar(100)) AS PFS,
+      CAST(NULL AS int) AS PriceCp,
+      ue.PriceText,
+      CAST(NULL AS decimal(18, 4)) AS BulkValue,
+      ue.BulkText,
+      ue.Description AS Summary,
+      CAST(NULL AS nvarchar(255)) AS RemasterId,
+      CAST(NULL AS nvarchar(max)) AS BaseItemText,
+      CAST(NULL AS nvarchar(max)) AS SpellText,
+      CAST(NULL AS nvarchar(max)) AS StageText,
+      CAST(NULL AS nvarchar(255)) AS WeaponCategory,
+      CAST(NULL AS nvarchar(255)) AS WeaponGroup,
+      CAST(NULL AS nvarchar(255)) AS WeaponType,
+      CAST(NULL AS nvarchar(255)) AS Damage,
+      CAST(NULL AS int) AS DamageDie,
+      CAST(NULL AS nvarchar(255)) AS DamageType,
+      CAST(NULL AS nvarchar(50)) AS Hands,
+      CAST(NULL AS nvarchar(max)) AS AmmunitionText,
+      CAST(NULL AS nvarchar(255)) AS ArmorCategory,
+      CAST(NULL AS nvarchar(max)) AS ArmorGroupText,
+      CAST(NULL AS int) AS AC,
+      CAST(NULL AS int) AS Hardness,
+      CAST(NULL AS nvarchar(255)) AS HardnessText,
+      CAST(NULL AS int) AS HP,
+      CAST(NULL AS nvarchar(255)) AS HPText,
+      ue.ContentType
+    FROM pf2.UserEquipment ue
+    ${whereSql}
+    ORDER BY ${orderBySql}
+    OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
+
+    SELECT COUNT(*) AS Total
+    FROM pf2.UserEquipment ue
+    ${whereSql};
+  `;
+
+  const result = await request.query(query);
+  const rows = result.recordsets?.[0] || [];
+  const total = result.recordsets?.[1]?.[0]?.Total || 0;
+  logValue('Rows returned:', rows.length);
+  logValue('Total:', total);
+  logValue('Elapsed ms:', Date.now() - started);
+  res.json({
+    rows,
+    total,
+    limit,
+    offset,
+    debug: debugSqlEnabled()
+      ? { where, params: debugParams, sortBy, sortDir, orderBySql, elapsedMs: Date.now() - started }
+      : undefined
+  });
+}
+
 app.get('/api/equipment', async (req, res) => {
   const started = Date.now();
 
@@ -1296,6 +1598,12 @@ app.get('/api/equipment', async (req, res) => {
     logValue('Raw query params:', req.query);
 
     const pool = await getPool();
+    const requestedContentType = String(req.query.contentType ?? '').trim().toLowerCase();
+    if (requestedContentType === USER_MONSTER_CONTENT_TYPE) {
+      await sendUserEquipmentSearch(req, res, pool, started);
+      return;
+    }
+
     const request = pool.request();
 
     const where = [];
@@ -1443,7 +1751,8 @@ app.get('/api/equipment', async (req, res) => {
         e.Hardness,
         e.HardnessText,
         e.HP,
-        e.HPText
+        e.HPText,
+        N'canon' AS ContentType
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -3203,18 +3512,42 @@ async function sendTableRow(res, { id, missing, sqlText, param }) {
   }
 }
 
-app.get('/api/equipment/:equipmentId', (req, res) => {
-  const equipmentId = parsePositiveId(req.params.equipmentId);
-  if (!equipmentId) {
+app.post('/api/user-equipment', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
+  try {
+    logSection('POST /api/user-equipment');
+    const pool = await getPool();
+    await ensureUserEquipmentSchema(pool);
+    const payload = buildUserEquipmentPayload(req.body || {});
+    const userEquipmentId = await insertUserEquipment(pool, payload);
+    const row = await fetchEquipmentById(pool, -userEquipmentId);
+    res.status(201).json(row);
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+});
+
+app.get('/api/equipment/:equipmentId', async (req, res) => {
+  const equipmentId = Number(req.params.equipmentId);
+  if (!Number.isInteger(equipmentId) || equipmentId === 0) {
     res.status(400).json({ error: 'Invalid equipmentId' });
     return;
   }
-  return sendTableRow(res, {
-    id: equipmentId,
-    param: 'equipmentId',
-    missing: 'Equipment not found',
-    sqlText: 'SELECT * FROM pf2.Equipment WHERE EquipmentId = @equipmentId'
-  });
+
+  try {
+    const pool = await getPool();
+    const row = await fetchEquipmentById(pool, equipmentId);
+    if (!row) {
+      res.status(404).json({ error: 'Equipment not found' });
+      return;
+    }
+    res.json(row);
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
 });
 
 app.get('/api/feats/:featId', (req, res) => {
