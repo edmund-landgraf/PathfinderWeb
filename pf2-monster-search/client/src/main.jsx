@@ -974,6 +974,13 @@ function NavBar({ currentPage, onNavigate, className = '' }) {
   );
 }
 
+function getEquipmentPermalinkId() {
+  const match = window.location.pathname.match(/^\/equipment\/(-?\d+)$/i);
+  if (!match) return null;
+  const equipmentId = Number(match[1]);
+  return Number.isInteger(equipmentId) && equipmentId !== 0 ? equipmentId : null;
+}
+
 function getMonsterPermalinkId() {
   const match = window.location.pathname.match(/^\/monsters\/(-?\d+)$/i);
   if (!match) return null;
@@ -1037,6 +1044,7 @@ function getCurrentPage() {
   if (getMonsterCard2Id() != null) return 'monster-card2';
   if (getMonsterCardId() != null) return 'monster-card';
   if (getMonsterPermalinkId() != null) return 'monster';
+  if (getEquipmentPermalinkId() != null) return 'equipment-item';
   if (path === '/equipment') return 'equipment';
   if (path === '/feats') return 'feats';
   if (path === '/spells') return 'spells';
@@ -1098,6 +1106,10 @@ function AppRoutes() {
 
   if (page === 'feats') {
     return <FeatsPage onNavigate={navigate} />;
+  }
+
+  if (page === 'equipment-item') {
+    return <EquipmentDirectPage equipmentId={getEquipmentPermalinkId()} onNavigate={navigate} />;
   }
 
   if (page === 'equipment') {
@@ -4319,7 +4331,8 @@ function isSupportedMarkdownHref(href) {
 
     return localMarkdownRoutes.has(url.pathname.toLowerCase())
       || /^\/monsters\/-?\d+$/i.test(url.pathname)
-      || /^\/monsters\/-?\d+\/card2?$/i.test(url.pathname);
+      || /^\/monsters\/-?\d+\/card2?$/i.test(url.pathname)
+      || /^\/equipment\/-?\d+$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -5219,6 +5232,70 @@ function FeatModal({ feat, onClose }) {
           onCloseImage={() => setIsImagePopoutOpen(false)}
         />
       </div>
+    </div>
+  );
+}
+
+function EquipmentDirectPage({ equipmentId, onNavigate }) {
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetchApi(`/api/equipment/${equipmentId}`);
+        if (res.status === 404) throw new Error('Equipment not found');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const data = await res.json();
+        if (!cancelled) setItem(data);
+      } catch (err) {
+        if (!cancelled) {
+          setItem(null);
+          setError(err.message || String(err));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [equipmentId]);
+
+  function handleClose() {
+    if (window.opener && !window.opener.closed) {
+      window.close();
+      return;
+    }
+    onNavigate('/equipment');
+  }
+
+  return (
+    <div className="app monsterDirectPage">
+      <header className="topbar">
+        <div>
+          <h1>{item?.Name || 'Equipment'}</h1>
+          <p>Direct equipment view — not tied to search.</p>
+        </div>
+        <NavBar currentPage="equipment-item" onNavigate={onNavigate} />
+      </header>
+
+      {loading && <p className="monsterDirectStatus">Loading...</p>}
+      {error && <p className="monsterDirectStatus error">{error}</p>}
+
+      {item && (
+        <EquipmentModal
+          item={item}
+          onClose={handleClose}
+        />
+      )}
     </div>
   );
 }
