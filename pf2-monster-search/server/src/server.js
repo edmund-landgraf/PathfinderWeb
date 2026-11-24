@@ -1604,6 +1604,127 @@ async function sendUserEquipmentSearch(req, res, pool, started) {
   });
 }
 
+async function hydrateEquipmentPage(pool, ids) {
+  const canonIds = ids.filter((id) => id > 0);
+  const userIds = ids.filter((id) => id < 0).map((id) => -id);
+  const request = pool.request();
+  canonIds.forEach((id, index) => request.input(`canonEquip${index}`, sql.Int, id));
+  userIds.forEach((id, index) => request.input(`userEquip${index}`, sql.Int, id));
+  const canonIn = canonIds.length
+    ? `e.EquipmentId IN (${canonIds.map((_, index) => `@canonEquip${index}`).join(', ')})`
+    : '1 = 0';
+  const userIn = userIds.length
+    ? `ue.UserEquipmentId IN (${userIds.map((_, index) => `@userEquip${index}`).join(', ')})`
+    : '1 = 0';
+  const result = await request.query(`
+    SELECT
+      e.EquipmentId,
+      e.AonId,
+      e.AonKey,
+      e.AonUrl,
+      e.Name,
+      e.Level,
+      e.EquipmentType,
+      e.SearchCategory,
+      e.ItemCategory,
+      e.ItemSubcategory,
+      r.Name AS Rarity,
+      sources.SourceBook,
+      sources.SourcePurchaseURL,
+      e.SourcePage,
+      traits.Traits,
+      e.PFS,
+      e.PriceCp,
+      e.PriceText,
+      e.BulkValue,
+      e.BulkText,
+      e.Summary,
+      e.RemasterId,
+      e.BaseItemText,
+      e.SpellText,
+      e.StageText,
+      e.WeaponCategory,
+      e.WeaponGroup,
+      e.WeaponType,
+      e.Damage,
+      e.DamageDie,
+      e.DamageType,
+      e.Hands,
+      e.AmmunitionText,
+      e.ArmorCategory,
+      e.ArmorGroupText,
+      e.AC,
+      e.Hardness,
+      e.HardnessText,
+      e.HP,
+      e.HPText,
+      N'canon' AS ContentType,
+      CAST(NULL AS nvarchar(200)) AS ImageUrl
+    FROM pf2.Equipment e
+    LEFT JOIN pf2.Rarity r ON r.RarityId = e.RarityId
+    LEFT JOIN pf2.SourceBook sb ON sb.SourceBookId = e.SourceBookId
+    LEFT JOIN pf2.SourceBookPurchase sbp ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
+    OUTER APPLY (
+      SELECT STRING_AGG(t.Name, ', ') AS Traits
+      FROM pf2.EquipmentTrait et
+      INNER JOIN pf2.Trait t ON t.TraitId = et.TraitId
+      WHERE et.EquipmentId = e.EquipmentId
+    ) traits
+    ${sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')}
+    WHERE ${canonIn}
+
+    UNION ALL
+
+    SELECT
+      -ue.UserEquipmentId AS EquipmentId,
+      CAST(NULL AS int),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(2048)),
+      ue.Name,
+      ue.Level,
+      ue.ItemCategory,
+      CAST(NULL AS nvarchar(255)),
+      ue.ItemCategory,
+      CAST(NULL AS nvarchar(255)),
+      ue.Rarity,
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(2048)),
+      CAST(NULL AS int),
+      ue.Traits,
+      CAST(NULL AS nvarchar(100)),
+      CAST(NULL AS int),
+      ue.PriceText,
+      CAST(NULL AS decimal(18, 4)),
+      ue.BulkText,
+      ue.Description,
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(max)),
+      CAST(NULL AS nvarchar(max)),
+      CAST(NULL AS nvarchar(max)),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS int),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(50)),
+      CAST(NULL AS nvarchar(max)),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS nvarchar(max)),
+      CAST(NULL AS int),
+      CAST(NULL AS int),
+      CAST(NULL AS nvarchar(255)),
+      CAST(NULL AS int),
+      CAST(NULL AS nvarchar(255)),
+      ue.ContentType,
+      CASE WHEN ue.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-equipment/', ue.UserEquipmentId, N'/image/thumb') END
+    FROM pf2.UserEquipment ue
+    WHERE ${userIn};
+  `);
+  const byId = new Map((result.recordset || []).map((row) => [row.EquipmentId, row]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
 app.get('/api/equipment', async (req, res) => {
   const started = Date.now();
 
@@ -1695,33 +1816,33 @@ app.get('/api/equipment', async (req, res) => {
       value: offset
     };
 
+    const equipmentSortNeeds = {
+      traits: sortBy === 'Traits',
+      sources: sortBy === 'SourceBook'
+    };
+    const traitApplySql = equipmentSortNeeds.traits ? `
+      OUTER APPLY (
+        SELECT STRING_AGG(t.Name, ', ') AS Traits
+        FROM pf2.EquipmentTrait et
+        INNER JOIN pf2.Trait t ON t.TraitId = et.TraitId
+        WHERE et.EquipmentId = e.EquipmentId
+      ) traits` : '';
+    const sourceApplySql = equipmentSortNeeds.sources || where.some((clause) => clause.includes('sources.'))
+      ? sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')
+      : '';
+
     const fromSql = `
       FROM pf2.Equipment e
       LEFT JOIN pf2.Rarity r
         ON r.RarityId = e.RarityId
-      LEFT JOIN pf2.SourceBook sb
-        ON sb.SourceBookId = e.SourceBookId
-      LEFT JOIN pf2.SourceBookPurchase sbp
-        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-      OUTER APPLY (
-        SELECT STRING_AGG(t.Name, ', ') AS Traits
-        FROM pf2.EquipmentTrait et
-        INNER JOIN pf2.Trait t
-          ON t.TraitId = et.TraitId
-        WHERE et.EquipmentId = e.EquipmentId
-      ) traits
-      ${sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')}
+      ${traitApplySql}
+      ${sourceApplySql}
     `;
 
     const countFromSql = `
       FROM pf2.Equipment e
-      LEFT JOIN pf2.Rarity r
-        ON r.RarityId = e.RarityId
-      LEFT JOIN pf2.SourceBook sb
-        ON sb.SourceBookId = e.SourceBookId
-      LEFT JOIN pf2.SourceBookPurchase sbp
-        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-      ${sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId')}
+      ${where.some((clause) => clause.includes('r.')) ? `LEFT JOIN pf2.Rarity r ON r.RarityId = e.RarityId` : ''}
+      ${where.some((clause) => clause.includes('sources.')) ? sourcesOuterApplySql('e', 'EquipmentSourceLink', 'EquipmentId') : ''}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -1776,9 +1897,6 @@ app.get('/api/equipment', async (req, res) => {
     const userListSql = `
       SELECT
         -ue.UserEquipmentId AS EquipmentId,
-        CAST(NULL AS int) AS AonId,
-        CAST(NULL AS nvarchar(255)) AS AonKey,
-        CAST(NULL AS nvarchar(2048)) AS AonUrl,
         ue.Name,
         ue.Level,
         ue.ItemCategory AS EquipmentType,
@@ -1787,48 +1905,20 @@ app.get('/api/equipment', async (req, res) => {
         CAST(NULL AS nvarchar(255)) AS ItemSubcategory,
         ue.Rarity,
         CAST(NULL AS nvarchar(255)) AS SourceBook,
-        CAST(NULL AS nvarchar(2048)) AS SourcePurchaseURL,
-        CAST(NULL AS int) AS SourcePage,
-        ue.Traits,
-        CAST(NULL AS nvarchar(100)) AS PFS,
+        ${sortBy === 'Traits' ? 'ue.Traits' : 'CAST(NULL AS nvarchar(max))'} AS Traits,
         CAST(NULL AS int) AS PriceCp,
-        ue.PriceText,
         CAST(NULL AS decimal(18, 4)) AS BulkValue,
-        ue.BulkText,
-        ue.Description AS Summary,
-        CAST(NULL AS nvarchar(255)) AS RemasterId,
-        CAST(NULL AS nvarchar(max)) AS BaseItemText,
-        CAST(NULL AS nvarchar(max)) AS SpellText,
-        CAST(NULL AS nvarchar(max)) AS StageText,
         CAST(NULL AS nvarchar(255)) AS WeaponCategory,
-        CAST(NULL AS nvarchar(255)) AS WeaponGroup,
-        CAST(NULL AS nvarchar(255)) AS WeaponType,
-        CAST(NULL AS nvarchar(255)) AS Damage,
-        CAST(NULL AS int) AS DamageDie,
-        CAST(NULL AS nvarchar(255)) AS DamageType,
-        CAST(NULL AS nvarchar(50)) AS Hands,
-        CAST(NULL AS nvarchar(max)) AS AmmunitionText,
-        CAST(NULL AS nvarchar(255)) AS ArmorCategory,
-        CAST(NULL AS nvarchar(max)) AS ArmorGroupText,
-        CAST(NULL AS int) AS AC,
-        CAST(NULL AS int) AS Hardness,
-        CAST(NULL AS nvarchar(255)) AS HardnessText,
-        CAST(NULL AS int) AS HP,
-        CAST(NULL AS nvarchar(255)) AS HPText,
-        ue.ContentType,
-        CASE WHEN ue.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-equipment/', ue.UserEquipmentId, N'/image/thumb') END AS ImageUrl
+        CAST(NULL AS nvarchar(255)) AS ArmorCategory
       FROM pf2.UserEquipment ue
       ${userWhereSql}
     `;
 
     const query = includeUserEquipment ? `
-      SELECT *
+      SELECT EquipmentId
       FROM (
         SELECT
           e.EquipmentId,
-          e.AonId,
-          e.AonKey,
-          e.AonUrl,
           e.Name,
           e.Level,
           e.EquipmentType,
@@ -1836,37 +1926,12 @@ app.get('/api/equipment', async (req, res) => {
           e.ItemCategory,
           e.ItemSubcategory,
           r.Name AS Rarity,
-          sources.SourceBook,
-          sources.SourcePurchaseURL,
-          e.SourcePage,
-          traits.Traits,
-          e.PFS,
+          ${equipmentSortNeeds.sources ? 'sources.SourceBook' : 'CAST(NULL AS nvarchar(255)) AS SourceBook'},
+          ${equipmentSortNeeds.traits ? 'traits.Traits' : 'CAST(NULL AS nvarchar(max)) AS Traits'},
           e.PriceCp,
-          e.PriceText,
           e.BulkValue,
-          e.BulkText,
-          e.Summary,
-          e.RemasterId,
-          e.BaseItemText,
-          e.SpellText,
-          e.StageText,
           e.WeaponCategory,
-          e.WeaponGroup,
-          e.WeaponType,
-          e.Damage,
-          e.DamageDie,
-          e.DamageType,
-          e.Hands,
-          e.AmmunitionText,
-          e.ArmorCategory,
-          e.ArmorGroupText,
-          e.AC,
-          e.Hardness,
-          e.HardnessText,
-          e.HP,
-          e.HPText,
-          N'canon' AS ContentType,
-          CAST(NULL AS nvarchar(200)) AS ImageUrl
+          e.ArmorCategory
         ${fromSql}
         ${whereSql}
 
@@ -1881,49 +1946,7 @@ app.get('/api/equipment', async (req, res) => {
         (SELECT COUNT(*) ${countFromSql} ${whereSql})
         + (SELECT COUNT(*) FROM pf2.UserEquipment ue ${userWhereSql}) AS Total;
     ` : `
-      SELECT
-        e.EquipmentId,
-        e.AonId,
-        e.AonKey,
-        e.AonUrl,
-        e.Name,
-        e.Level,
-        e.EquipmentType,
-        e.SearchCategory,
-        e.ItemCategory,
-        e.ItemSubcategory,
-        r.Name AS Rarity,
-        sources.SourceBook,
-        sources.SourcePurchaseURL,
-        e.SourcePage,
-        traits.Traits,
-        e.PFS,
-        e.PriceCp,
-        e.PriceText,
-        e.BulkValue,
-        e.BulkText,
-        e.Summary,
-        e.RemasterId,
-        e.BaseItemText,
-        e.SpellText,
-        e.StageText,
-        e.WeaponCategory,
-        e.WeaponGroup,
-        e.WeaponType,
-        e.Damage,
-        e.DamageDie,
-        e.DamageType,
-        e.Hands,
-        e.AmmunitionText,
-        e.ArmorCategory,
-        e.ArmorGroupText,
-        e.AC,
-        e.Hardness,
-        e.HardnessText,
-        e.HP,
-        e.HPText,
-        N'canon' AS ContentType,
-        CAST(NULL AS nvarchar(200)) AS ImageUrl
+      SELECT e.EquipmentId
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -1941,8 +1964,9 @@ app.get('/api/equipment', async (req, res) => {
 
     const result = await request.query(query);
 
-    const rows = result.recordsets?.[0] || [];
+    const pageIds = (result.recordsets?.[0] || []).map((row) => row.EquipmentId);
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
+    const rows = pageIds.length ? await hydrateEquipmentPage(pool, pageIds) : [];
     if (isArtEnabled(req)) art.filterRows(req, rows);
 
     logValue('Rows returned:', rows.length);
@@ -2066,7 +2090,6 @@ app.get('/api/feats', async (req, res) => {
           sb.Name AS PrimarySourceBook,
           sbp.StoreUrl AS PrimarySourcePurchaseURL,
           f.SourcePage,
-          traits.Traits,
           f.PFS,
           f.IsStandardAncestryFeat,
           f.Summary,
@@ -2097,13 +2120,6 @@ app.get('/api/feats', async (req, res) => {
           ON sb.SourceBookId = f.SourceBookId
         LEFT JOIN pf2.SourceBookPurchase sbp
           ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-        OUTER APPLY (
-          SELECT STRING_AGG(t.Name, ', ') AS Traits
-          FROM pf2.FeatTrait ft
-          INNER JOIN pf2.Trait t
-            ON t.TraitId = ft.TraitId
-          WHERE ft.FeatId = f.FeatId
-        ) traits
       ),
       feat_dedup AS (
         SELECT *
@@ -2164,7 +2180,7 @@ app.get('/api/feats', async (req, res) => {
 
     const countFromSql = `
       FROM feat_dedup f
-      ${featSourcesOuterApplySql}
+      ${where.some((clause) => clause.includes('sources.')) ? featSourcesOuterApplySql : ''}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -2363,13 +2379,14 @@ app.get('/api/spells', async (req, res) => {
 
     const countFromSql = `
       FROM pf2.Spell s
-      LEFT JOIN pf2.Rarity r
-        ON r.RarityId = s.RarityId
-      LEFT JOIN pf2.SourceBook sb
-        ON sb.SourceBookId = s.SourceBookId
-      LEFT JOIN pf2.SourceBookPurchase sbp
-        ON sbp.SourceBookPurchaseId = sb.SourcePurchaseID
-      ${sourcesOuterApplySql('s', 'SpellSourceLink', 'SpellId')}
+      ${where.some((clause) => clause.includes('r.')) ? 'LEFT JOIN pf2.Rarity r ON r.RarityId = s.RarityId' : ''}
+      ${where.some((clause) => clause.includes('traditions.')) ? `OUTER APPLY (
+        SELECT STRING_AGG(tr.Name, ', ') AS Traditions
+        FROM pf2.SpellTradition st
+        INNER JOIN pf2.Tradition tr ON tr.TraditionId = st.TraditionId
+        WHERE st.SpellId = s.SpellId
+      ) traditions` : ''}
+      ${where.some((clause) => clause.includes('sources.')) ? sourcesOuterApplySql('s', 'SpellSourceLink', 'SpellId') : ''}
     `;
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
