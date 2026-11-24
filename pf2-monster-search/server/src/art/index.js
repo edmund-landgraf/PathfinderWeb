@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { parseArtPasswords, matchArtPassword, signArtToken, verifyArtToken } from './passwords.js';
 import { createRateLimiter } from './rateLimit.js';
 import { decodeUploadBody, sanitizeImage } from './imageCheck.js';
-import { SCHEMA_SQL, TARGETS, readCurrentArt, writeArt, LIST_COLUMNS } from './store.js';
+import { SCHEMA_SQL, TARGETS, readCurrentArt, writeArt, LIST_COLUMNS, artBasePath } from './store.js';
 
 const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '') !== '' ? Number(v) : d);
 const LIVE = ['pending', 'approved', 'auto_approved'];
@@ -86,8 +86,9 @@ export function createArtGuardrails(opts) {
   function filterRows(req, rows) {
     if (!pending.size || isPrivileged(req)) return rows;
     for (const row of rows || []) {
-      const m = /\/api\/(monsters|user-monsters)\/(-?\d+)\/image/.exec(row?.ImageUrl || '');
-      if (m && isPending(m[1] === 'monsters' ? 'monster' : 'user-monster', m[2])) row.ImageUrl = null;
+      const m = /\/api\/(monsters|user-monsters|user-equipment)\/(-?\d+)\/image/.exec(row?.ImageUrl || '');
+      const type = m?.[1] === 'monsters' ? 'monster' : m?.[1];
+      if (m && isPending(type, m[2])) row.ImageUrl = null;
     }
     return rows;
   }
@@ -96,7 +97,7 @@ export function createArtGuardrails(opts) {
   // ---- upload ------------------------------------------------------------------
   function uploadHandler(type) {
     return async (req, res) => {
-      const id = Number(req.params.monsterId ?? req.params.userMonsterId);
+      const id = Number(req.params.monsterId ?? req.params.userMonsterId ?? req.params.userEquipmentId);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
 
       const admin = isAdmin(req);
@@ -125,7 +126,9 @@ export function createArtGuardrails(opts) {
       try {
         const p = await pool();
         const exists = await p.request().input('id', sql.Int, id).query(TARGETS[type].exists);
-        if (!exists.recordset?.[0]) return res.status(404).json({ error: 'Creature not found' });
+        if (!exists.recordset?.[0]) {
+          return res.status(404).json({ error: type === 'user-equipment' ? 'Item not found' : 'Creature not found' });
+        }
 
         tx = new sql.Transaction(p);
         await tx.begin();
@@ -133,7 +136,11 @@ export function createArtGuardrails(opts) {
         // Canon art may be replaced by an art-password session. User-generated art stays fill-empty-only.
         if (!admin && type !== 'monster' && prev.image) {
           await tx.rollback(); tx = null;
-          return res.status(409).json({ error: 'This creature already has art. Replacing art requires admin.' });
+          return res.status(409).json({
+            error: type === 'user-equipment'
+              ? 'This item already has art. Replacing art requires admin.'
+              : 'This creature already has art. Replacing art requires admin.'
+          });
         }
         await writeArt(new sql.Request(tx), sql, type, id, { image: image.buffer, contentType: image.contentType, rowExists: prev.rowExists });
         await new sql.Request(tx)
@@ -157,8 +164,7 @@ export function createArtGuardrails(opts) {
 
         if (status === 'pending') pending.set(key(type, id), Date.now()); else pending.delete(key(type, id));
         onImageChanged(type, id);
-        const base = type === 'monster' ? `/api/monsters/${id}` : `/api/user-monsters/${id}`;
-        res.json({ ok: true, status, imageUrl: `${base}/image/thumb` });
+        res.json({ ok: true, status, imageUrl: `${artBasePath(type, id)}/image/thumb` });
       } catch (err) {
         if (tx) await tx.rollback().catch(() => {});
         httpError(res, err);
@@ -244,7 +250,7 @@ export function createArtGuardrails(opts) {
         rows: (result.recordset || []).map((row) => ({
           ...row,
           suspect: row.Role === 'art' && !activeVersions.has(row.PasswordVersion),
-          previewUrl: `${row.TargetType === 'monster' ? '/api/monsters' : '/api/user-monsters'}/${row.TargetId}/image`
+          previewUrl: `${artBasePath(row.TargetType, row.TargetId)}/image`
         }))
       });
     }));

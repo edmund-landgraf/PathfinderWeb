@@ -491,6 +491,8 @@ These writes return `401` without a valid admin cookie:
 - `DELETE /api/user-monsters/:userMonsterId/image` clears art and leaves the stat block in place.
 - `PUT /api/user-monsters/:userMonsterId/image`
 - `PUT /api/monsters/:monsterId/image` (also `403` while `ENABLE_ART=true`)
+- `POST /api/user-equipment` creates a custom item (`name` required; `level`, `rarity`, `price`, `bulk`, `usage`, `traits`, `category`, `description`, and `imageDataUrl` are optional). The row appears in equipment search with a negative `equipmentId`.
+- `PUT /api/user-equipment/:userEquipmentId/image` attaches PNG, JPEG, or WebP art. The file is re-encoded and audited the same way as creature art. `GET` the same path, or `/image/thumb`, returns the bytes when art is unlocked.
 
 Lookup routes (`/api/lookups`, `/api/spell-lookups`, `/api/feat-lookups`, `/api/equipment-lookups`) return id/name lists for the filter dropdowns. They do not include a SQL debug object.
 

@@ -315,9 +315,15 @@ function ensureUserEquipmentSchema(pool) {
           ItemCategory nvarchar(255) NULL,
           CreatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserEquipment_CreatedAt DEFAULT SYSUTCDATETIME(),
           UpdatedAt datetime2(0) NOT NULL CONSTRAINT DF_UserEquipment_UpdatedAt DEFAULT SYSUTCDATETIME(),
+          Image varbinary(max) NULL,
+          ImageContentType nvarchar(100) NULL,
           CONSTRAINT CK_UserEquipment_ContentType CHECK (ContentType IN (N'user generated'))
         );
       END;
+      IF COL_LENGTH(N'pf2.UserEquipment', N'Image') IS NULL
+        ALTER TABLE pf2.UserEquipment ADD Image varbinary(max) NULL;
+      IF COL_LENGTH(N'pf2.UserEquipment', N'ImageContentType') IS NULL
+        ALTER TABLE pf2.UserEquipment ADD ImageContentType nvarchar(100) NULL;
     `).catch((err) => {
       userEquipmentSchemaPromise = null;
       throw err;
@@ -380,7 +386,8 @@ function equipmentDetailSql(source) {
         ue.ContentType,
         ue.Rarity,
         ue.Usage,
-        ue.Traits
+        ue.Traits,
+        CASE WHEN ue.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-equipment/', ue.UserEquipmentId, N'/image/thumb') END AS ImageUrl
       FROM pf2.UserEquipment ue
       WHERE ue.UserEquipmentId = @userEquipmentId
     `;
@@ -439,7 +446,8 @@ function buildUserEquipmentPayload(body) {
     usage: cleanString(body?.usage ?? body?.Usage, 200),
     description: cleanString(body?.description ?? body?.Description ?? body?.summary ?? body?.Summary, 100000),
     traits: cleanString(body?.traits ?? body?.Traits, 8000),
-    itemCategory: cleanString(body?.category ?? body?.itemCategory ?? body?.Category ?? body?.ItemCategory, 255)
+    itemCategory: cleanString(body?.category ?? body?.itemCategory ?? body?.Category ?? body?.ItemCategory, 255),
+    image: parseImagePayload(body)
   };
 }
 
@@ -454,13 +462,17 @@ async function insertUserEquipment(pool, payload) {
     .input('description', sql.NVarChar(sql.MAX), payload.description)
     .input('traits', sql.NVarChar(sql.MAX), payload.traits)
     .input('itemCategory', sql.NVarChar(255), payload.itemCategory)
+    .input('image', sql.VarBinary(sql.MAX), payload.image.buffer)
+    .input('imageContentType', sql.NVarChar(100), payload.image.contentType)
     .query(`
       INSERT INTO pf2.UserEquipment (
-        Name, Level, Rarity, PriceText, BulkText, Usage, Description, Traits, ItemCategory
+        Name, Level, Rarity, PriceText, BulkText, Usage, Description, Traits, ItemCategory,
+        Image, ImageContentType
       )
       OUTPUT INSERTED.UserEquipmentId
       VALUES (
-        @name, @level, @rarity, @priceText, @bulkText, @usage, @description, @traits, @itemCategory
+        @name, @level, @rarity, @priceText, @bulkText, @usage, @description, @traits, @itemCategory,
+        @image, @imageContentType
       );
     `);
 
@@ -1562,7 +1574,8 @@ async function sendUserEquipmentSearch(req, res, pool, started) {
       CAST(NULL AS nvarchar(255)) AS HardnessText,
       CAST(NULL AS int) AS HP,
       CAST(NULL AS nvarchar(255)) AS HPText,
-      ue.ContentType
+      ue.ContentType,
+      CASE WHEN ue.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-equipment/', ue.UserEquipmentId, N'/image/thumb') END AS ImageUrl
     FROM pf2.UserEquipment ue
     ${whereSql}
     ORDER BY ${orderBySql}
@@ -1576,6 +1589,7 @@ async function sendUserEquipmentSearch(req, res, pool, started) {
   const result = await request.query(query);
   const rows = result.recordsets?.[0] || [];
   const total = result.recordsets?.[1]?.[0]?.Total || 0;
+  if (isArtEnabled(req)) art.filterRows(req, rows);
   logValue('Rows returned:', rows.length);
   logValue('Total:', total);
   logValue('Elapsed ms:', Date.now() - started);
@@ -1801,7 +1815,8 @@ app.get('/api/equipment', async (req, res) => {
         CAST(NULL AS nvarchar(255)) AS HardnessText,
         CAST(NULL AS int) AS HP,
         CAST(NULL AS nvarchar(255)) AS HPText,
-        ue.ContentType
+        ue.ContentType,
+        CASE WHEN ue.Image IS NULL THEN NULL ELSE CONCAT(N'/api/user-equipment/', ue.UserEquipmentId, N'/image/thumb') END AS ImageUrl
       FROM pf2.UserEquipment ue
       ${userWhereSql}
     `;
@@ -1850,7 +1865,8 @@ app.get('/api/equipment', async (req, res) => {
           e.HardnessText,
           e.HP,
           e.HPText,
-          N'canon' AS ContentType
+          N'canon' AS ContentType,
+          CAST(NULL AS nvarchar(200)) AS ImageUrl
         ${fromSql}
         ${whereSql}
 
@@ -1906,7 +1922,8 @@ app.get('/api/equipment', async (req, res) => {
         e.HardnessText,
         e.HP,
         e.HPText,
-        N'canon' AS ContentType
+        N'canon' AS ContentType,
+        CAST(NULL AS nvarchar(200)) AS ImageUrl
       ${fromSql}
       ${whereSql}
       ORDER BY ${orderBySql}
@@ -1926,6 +1943,7 @@ app.get('/api/equipment', async (req, res) => {
 
     const rows = result.recordsets?.[0] || [];
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
+    if (isArtEnabled(req)) art.filterRows(req, rows);
 
     logValue('Rows returned:', rows.length);
     logValue('Total:', total);
@@ -3683,6 +3701,63 @@ app.post('/api/user-equipment', async (req, res) => {
   }
 });
 
+async function sendUserEquipmentImage(req, res, { cacheControl }) {
+  if (rejectArtIfLocked(req, res)) return;
+
+  const userEquipmentId = Number(req.params.userEquipmentId);
+  if (!Number.isInteger(userEquipmentId) || userEquipmentId <= 0) {
+    res.status(400).json({ error: 'Invalid userEquipmentId' });
+    return;
+  }
+  if (art.hidePending(req, 'user-equipment', userEquipmentId)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).json({ error: 'Item image not found' });
+    return;
+  }
+  cacheControl = art.cacheControlFor('user-equipment', userEquipmentId, cacheControl);
+
+  try {
+    const pool = await getPool();
+    await ensureUserEquipmentSchema(pool);
+    const result = await pool.request()
+      .input('userEquipmentId', sql.Int, userEquipmentId)
+      .query(`
+        SELECT Image, ImageContentType
+        FROM pf2.UserEquipment
+        WHERE UserEquipmentId = @userEquipmentId
+          AND Image IS NOT NULL;
+      `);
+    const buffer = result.recordset?.[0]?.Image;
+    if (!buffer?.length) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(404).json({ error: 'Item image not found' });
+      return;
+    }
+    sendMonsterImageResponse(res, {
+      buffer,
+      contentType: result.recordset[0].ImageContentType || detectImageContentType(buffer),
+      byteLength: buffer.length
+    }, { cacheControl });
+  } catch (err) {
+    logError(err);
+    res.status(500).json({ error: getErrorMessage(err) });
+  }
+}
+
+const userEquipmentImageUpload = art.uploadHandler('user-equipment');
+app.put('/api/user-equipment/:userEquipmentId/image', (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+  return userEquipmentImageUpload(req, res);
+});
+
+app.get('/api/user-equipment/:userEquipmentId/image/thumb', (req, res) => {
+  sendUserEquipmentImage(req, res, { cacheControl: 'public, max-age=86400' });
+});
+
+app.get('/api/user-equipment/:userEquipmentId/image', (req, res) => {
+  sendUserEquipmentImage(req, res, { cacheControl: 'no-store' });
+});
+
 app.get('/api/equipment/:equipmentId', async (req, res) => {
   const equipmentId = Number(req.params.equipmentId);
   if (!Number.isInteger(equipmentId) || equipmentId === 0) {
@@ -3697,6 +3772,7 @@ app.get('/api/equipment/:equipmentId', async (req, res) => {
       res.status(404).json({ error: 'Equipment not found' });
       return;
     }
+    if (isArtEnabled(req)) art.filterRows(req, [row]);
     res.json(row);
   } catch (err) {
     logError(err);

@@ -187,6 +187,7 @@ test('unlock routes, cookies, and custom-content writes', async (t) => {
     ['POST', '/api/user-monsters/import', { name: 'Probe', hp: 40 }],
     ['POST', '/api/user-monsters', { name: 'Probe' }],
     ['POST', '/api/user-equipment', { name: 'Probe' }],
+    ['PUT', '/api/user-equipment/1/image', { imageDataUrl: 'data:image/png;base64,AA==' }],
     ['PUT', '/api/user-monsters', { name: 'Probe' }],
     ['PUT', '/api/user-monsters/1', { name: 'Probe' }],
     ['PATCH', '/api/user-monsters/1', { hp: 40 }],

@@ -111,7 +111,7 @@ The grid can show a lot of columns, but the default layout emphasizes common enc
 
 Code: `server/src/art/` (hooked into `server.js` in a few places). Tests: `cd server && npm test`.
 
-- **Fill empty only:** the art password can add art only to creatures with no art of their own. Replacing or removing art needs admin (`409` otherwise). Admin can remove art with `DELETE /api/admin/art/:type/:id` (`type` = `monster` or `user-monster`).
+- **Fill empty only:** the art password can add art only to creatures with no art of their own. Replacing or removing art needs admin (`409` otherwise). Admin can remove art with `DELETE /api/admin/art/:type/:id` (`type` = `monster`, `user-monster`, or `user-equipment`). Custom item art is uploaded with `PUT /api/user-equipment/:userEquipmentId/image` after `POST /api/user-equipment`.
 - **Versioned password:** `ART_PASSWORDS` (see `server/.env.example`). The art cookie carries the version; removing a version from the env invalidates its cookies on restart.
 - **File checks:** PNG/JPEG/WebP only, detected by magic bytes (declared MIME and extension ignored). Max `ART_MAX_BYTES` (5 MB) and `ART_MAX_DIMENSION` (4096 px). Every upload is re-encoded with `sharp`, which strips EXIF and anything else embedded. SVG/GIF are rejected. Art responses send `X-Content-Type-Options: nosniff` and a sandbox CSP, and unknown stored types go out as `application/octet-stream`.
 - **Rate limits:** per password version (`ART_UPLOAD_RATE_PER_VERSION`/hour) and per IP (`ART_UPLOAD_RATE_PER_IP`/hour). In-memory, so they reset on restart. Admin is exempt.

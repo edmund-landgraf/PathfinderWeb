@@ -1,8 +1,15 @@
 // SQL for pf2.ArtUpload (audit + review queue) and for reading/writing art on both targets.
 export const TARGETS = {
   monster: { exists: 'SELECT 1 AS ok FROM pf2.Monster WHERE MonsterId = @id' },
-  'user-monster': { exists: 'SELECT 1 AS ok FROM pf2.UserMonster WHERE UserMonsterId = @id' }
+  'user-monster': { exists: 'SELECT 1 AS ok FROM pf2.UserMonster WHERE UserMonsterId = @id' },
+  'user-equipment': { exists: 'SELECT 1 AS ok FROM pf2.UserEquipment WHERE UserEquipmentId = @id' }
 };
+
+export function artBasePath(type, id) {
+  if (type === 'monster') return `/api/monsters/${id}`;
+  if (type === 'user-equipment') return `/api/user-equipment/${id}`;
+  return `/api/user-monsters/${id}`;
+}
 
 export const SCHEMA_SQL = `
 IF OBJECT_ID(N'pf2.ArtUpload', N'U') IS NULL
@@ -38,6 +45,18 @@ BEGIN
   CREATE INDEX IX_ArtUpload_Status ON pf2.ArtUpload (Status, CreatedAt);
   CREATE INDEX IX_ArtUpload_Version ON pf2.ArtUpload (PasswordVersion, CreatedAt);
   CREATE INDEX IX_ArtUpload_Target ON pf2.ArtUpload (TargetType, TargetId, ArtUploadId);
+END;
+
+IF EXISTS (
+  SELECT 1 FROM sys.check_constraints
+  WHERE name = N'CK_ArtUpload_TargetType'
+    AND parent_object_id = OBJECT_ID(N'pf2.ArtUpload')
+    AND definition NOT LIKE N'%user-equipment%'
+)
+BEGIN
+  ALTER TABLE pf2.ArtUpload DROP CONSTRAINT CK_ArtUpload_TargetType;
+  ALTER TABLE pf2.ArtUpload ADD CONSTRAINT CK_ArtUpload_TargetType
+    CHECK (TargetType IN (N'monster', N'user-monster', N'user-equipment'));
 END;`;
 
 export async function readCurrentArt(request, type, id) {
@@ -49,9 +68,11 @@ export async function readCurrentArt(request, type, id) {
     const row = r.recordset?.[0];
     return { rowExists: Boolean(row), image: row?.Image || null, thumb: row?.Thumb || null, contentType: null };
   }
+  const table = type === 'user-equipment' ? 'pf2.UserEquipment' : 'pf2.UserMonster';
+  const idColumn = type === 'user-equipment' ? 'UserEquipmentId' : 'UserMonsterId';
   const r = await request.query(`
     SELECT Image, ImageContentType AS ContentType
-    FROM pf2.UserMonster WITH (UPDLOCK, HOLDLOCK) WHERE UserMonsterId = @id;`);
+    FROM ${table} WITH (UPDLOCK, HOLDLOCK) WHERE ${idColumn} = @id;`);
   const row = r.recordset?.[0];
   return { rowExists: Boolean(row), image: row?.Image || null, thumb: null, contentType: row?.ContentType || null };
 }
@@ -66,7 +87,9 @@ export async function writeArt(request, sql, type, id, { image, thumb, contentTy
     if (rowExists) return request.query('UPDATE pf2.MonsterImage SET MonsterImage = @image, MonsterThumbnail = @thumb WHERE MonsterID = @id;');
     return request.query('INSERT INTO pf2.MonsterImage (MonsterID, MonsterImage, MonsterThumbnail) VALUES (@id, @image, @thumb);');
   }
-  return request.query(`UPDATE pf2.UserMonster SET Image = @image, ImageContentType = @ct, UpdatedAt = SYSUTCDATETIME() WHERE UserMonsterId = @id;`);
+  const table = type === 'user-equipment' ? 'pf2.UserEquipment' : 'pf2.UserMonster';
+  const idColumn = type === 'user-equipment' ? 'UserEquipmentId' : 'UserMonsterId';
+  return request.query(`UPDATE ${table} SET Image = @image, ImageContentType = @ct, UpdatedAt = SYSUTCDATETIME() WHERE ${idColumn} = @id;`);
 }
 
 export const LIST_COLUMNS = `ArtUploadId, TargetType, TargetId, Action, NewSha256, NewContentType, NewBytes, NewWidth, NewHeight,
