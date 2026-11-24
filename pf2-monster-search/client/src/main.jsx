@@ -5306,7 +5306,8 @@ function FeatModal({ feat, onClose }) {
 }
 
 function EquipmentDirectPage({ equipmentId, onNavigate }) {
-  const [item, setItem] = useState(null);
+  const [name, setName] = useState('');
+  const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -5316,17 +5317,27 @@ function EquipmentDirectPage({ equipmentId, onNavigate }) {
     async function load() {
       setLoading(true);
       setError('');
+      setSvg('');
       try {
         const res = await fetchApi(`/api/equipment/${equipmentId}`);
         if (res.status === 404) throw new Error('Equipment not found');
         if (!res.ok) throw new Error(await readApiError(res));
-        const data = await res.json();
-        if (!cancelled) setItem(data);
-      } catch (err) {
-        if (!cancelled) {
-          setItem(null);
-          setError(err.message || String(err));
+        const item = await res.json();
+        if (!cancelled) setName(item.Name || '');
+        const imageUrl = String(item.ImageUrl || '').replace('/image/thumb', '/image');
+        let artFile = null;
+        if (imageUrl) {
+          const artRes = await fetch(imageUrl, { credentials: 'include' });
+          if (artRes.ok) {
+            const blob = await artRes.blob();
+            if (blob.size) artFile = new File([blob], 'item-art', { type: blob.type || 'image/png' });
+          }
         }
+        const file = await buildPf2EquipmentStatCardSvg(item, artFile);
+        const markup = await file.text();
+        if (!cancelled) setSvg(markup);
+      } catch (err) {
+        if (!cancelled) setError(err.message || String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -5338,33 +5349,21 @@ function EquipmentDirectPage({ equipmentId, onNavigate }) {
     };
   }, [equipmentId]);
 
-  function handleClose() {
-    if (window.opener && !window.opener.closed) {
-      window.close();
-      return;
-    }
-    onNavigate('/equipment');
-  }
-
   return (
     <div className="app monsterDirectPage">
       <header className="topbar">
         <div>
-          <h1>{item?.Name || 'Equipment'}</h1>
-          <p>Direct equipment view — not tied to search.</p>
+          <h1>{name || 'Equipment'}</h1>
+          <p>Item card</p>
         </div>
         <NavBar currentPage="equipment-item" onNavigate={onNavigate} />
       </header>
 
-      {loading && <p className="monsterDirectStatus">Loading...</p>}
-      {error && <p className="monsterDirectStatus error">{error}</p>}
-
-      {item && (
-        <EquipmentModal
-          item={item}
-          onClose={handleClose}
-        />
-      )}
+      <main className="pf2-card2-page">
+        {loading && <p className="pf2-card2-status">Loading...</p>}
+        {error && <p className="pf2-card2-status">{error}</p>}
+        {svg && <div className="pf2-card2-sheet" dangerouslySetInnerHTML={{ __html: svg }} />}
+      </main>
     </div>
   );
 }

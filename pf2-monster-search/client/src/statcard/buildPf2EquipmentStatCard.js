@@ -23,6 +23,7 @@ function addRow(rows, label, value, kind = 'field') {
 function markdownRows(raw) {
   const lines = String(raw ?? '').replace(/\r/g, '').split('\n');
   const rows = [];
+  const prose = [];
   let section = null;
 
   function flush() {
@@ -51,9 +52,10 @@ function markdownRows(raw) {
       continue;
     }
     if (section && line.trim()) section.value = `${section.value} ${line}`;
+    else if (line.trim()) prose.push(line.trim());
   }
   flush();
-  return rows;
+  return { rows, prose: cleanStatText(prose.join(' ')) };
 }
 
 function equipmentModel(item) {
@@ -73,13 +75,14 @@ function equipmentModel(item) {
   addRow(rows, 'Hardness', field(item, 'Hardness'));
   addRow(rows, 'HP', field(item, 'HP'));
   const seen = new Set(rows.map((row) => row.label.toLowerCase()));
-  for (const row of markdownRows(item?.RawMD ?? item?.rawMD)) {
+  const parsed = markdownRows(item?.RawMD ?? item?.rawMD ?? item?.Summary);
+  for (const row of parsed.rows) {
     if (seen.has(row.label.toLowerCase())) continue;
     seen.add(row.label.toLowerCase());
     rows.push(row);
   }
   if (!rows.some((row) => row.kind === 'ability')) {
-    addRow(rows, '', field(item, 'Summary'), 'ability');
+    addRow(rows, '', parsed.prose || field(item, 'Summary'), 'ability');
   }
   return {
     name,
