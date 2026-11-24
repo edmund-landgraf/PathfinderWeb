@@ -18,6 +18,7 @@ import { imageLibraryEntries } from './imagesLibrary.js';
 import './styles.css';
 import ArtReviewPanel from './ArtReviewPanel.jsx';
 import { buildPf2StatCardSvg } from './statcard/buildPf2StatCard.js';
+import { buildPf2EquipmentStatCardSvg } from './statcard/buildPf2EquipmentStatCard.js';
 
 
 async function copyText(value) {
@@ -974,6 +975,13 @@ function NavBar({ currentPage, onNavigate, className = '' }) {
   );
 }
 
+function getEquipmentCard2Id() {
+  const match = window.location.pathname.match(/^\/equipment\/(-?\d+)\/card2$/i);
+  if (!match) return null;
+  const equipmentId = Number(match[1]);
+  return Number.isInteger(equipmentId) && equipmentId !== 0 ? equipmentId : null;
+}
+
 function getEquipmentPermalinkId() {
   const match = window.location.pathname.match(/^\/equipment\/(-?\d+)$/i);
   if (!match) return null;
@@ -1039,8 +1047,13 @@ function monsterStatCardLink(monsterId, origin = window.location.origin) {
   return `${origin}/monsters/${monsterId}/card2`;
 }
 
+function equipmentStatCardLink(equipmentId, origin = window.location.origin) {
+  return `${origin}/equipment/${equipmentId}/card2`;
+}
+
 function getCurrentPage() {
   const path = window.location.pathname.toLowerCase();
+  if (getEquipmentCard2Id() != null) return 'equipment-card2';
   if (getMonsterCard2Id() != null) return 'monster-card2';
   if (getMonsterCardId() != null) return 'monster-card';
   if (getMonsterPermalinkId() != null) return 'monster';
@@ -1078,6 +1091,10 @@ function AppRoutes() {
   function navigate(path) {
     window.history.pushState(null, '', path);
     setPage(getCurrentPage());
+  }
+
+  if (page === 'equipment-card2') {
+    return <EquipmentCard2Page equipmentId={getEquipmentCard2Id()} />;
   }
 
   if (page === 'monster-card2') {
@@ -3642,6 +3659,57 @@ function buildMonsterCardHtml(monster, options) {
 </html>`;
 }
 
+function EquipmentCard2Page({ equipmentId }) {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      setSvg('');
+      try {
+        const res = await fetchApi(`/api/equipment/${equipmentId}`);
+        if (res.status === 404) throw new Error('Equipment not found');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const item = await res.json();
+        const imageUrl = String(item.ImageUrl || '').replace('/image/thumb', '/image');
+        let artFile = null;
+        if (imageUrl) {
+          const artRes = await fetch(imageUrl, { credentials: 'include' });
+          if (artRes.ok) {
+            const blob = await artRes.blob();
+            if (blob.size) artFile = new File([blob], 'item-art', { type: blob.type || 'image/png' });
+          }
+        }
+        const file = await buildPf2EquipmentStatCardSvg(item, artFile);
+        const markup = await file.text();
+        if (!cancelled) setSvg(markup);
+      } catch (err) {
+        if (!cancelled) setError(err.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [equipmentId]);
+
+  return (
+    <div className="pf2-card2-page">
+      {loading && <p className="pf2-card2-status">Loading...</p>}
+      {error && <p className="pf2-card2-status">{error}</p>}
+      {svg && <div className="pf2-card2-sheet" dangerouslySetInnerHTML={{ __html: svg }} />}
+    </div>
+  );
+}
+
 function MonsterCard2Page({ monsterId }) {
   const [svg, setSvg] = useState('');
   const [error, setError] = useState('');
@@ -4332,7 +4400,8 @@ function isSupportedMarkdownHref(href) {
     return localMarkdownRoutes.has(url.pathname.toLowerCase())
       || /^\/monsters\/-?\d+$/i.test(url.pathname)
       || /^\/monsters\/-?\d+\/card2?$/i.test(url.pathname)
-      || /^\/equipment\/-?\d+$/i.test(url.pathname);
+      || /^\/equipment\/-?\d+$/i.test(url.pathname)
+      || /^\/equipment\/-?\d+\/card2$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -5369,6 +5438,16 @@ function EquipmentModal({ item, onClose }) {
                   Open AoN <ExternalLink size={13} />
                 </a>
               )}
+
+              <div className="modal-action-row">
+                <button
+                  type="button"
+                  className="modal-small-button"
+                  onClick={() => window.open(equipmentStatCardLink(item.EquipmentId), `equipment-stat-card-${item.EquipmentId}`, 'popup=yes,width=760,height=980')}
+                >
+                  <Clipboard size={15} /> Stat card
+                </button>
+              </div>
             </div>
           </div>
 

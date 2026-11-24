@@ -54,7 +54,7 @@ async function embeddedImage(file) {
 }
 
 function chipText(value) {
-  return String(value ?? "").replace(/^Creature\s+[-+]?\d+\s*,?\s*/i, "").split(/,\s*/).map((part) => part.trim()).filter((part) => part && !/^Recall$/i.test(part) && !/^Knowledge$/i.test(part) && !/^Recall Knowledge/i.test(part));
+  return String(value ?? "").replace(/^(?:Creature|Item)\s+[-+]?\d+\s*,?\s*/i, "").split(/,\s*/).map((part) => part.trim()).filter((part) => part && !/^Recall$/i.test(part) && !/^Knowledge$/i.test(part) && !/^Recall Knowledge/i.test(part));
 }
 
 function styledUnits(fragments) {
@@ -237,7 +237,7 @@ export async function renderStatCardSvgFile({ header, name, rows, tokenFile, art
   const artBounds = artData ? { x: width - 314, y: 18, width: 296, height: 202 } : null;
   const topRight = artBounds ? artBounds.x - 16 : right;
   const typeRow = rows.find((row) => row.label === "Type");
-  const creatureType = String(typeRow?.value ?? "").match(/\bCreature\s+[-+]?\d+\b/i)?.[0] ?? "";
+  const creatureType = String(typeRow?.value ?? "").match(/\b(?:Creature|Item)\s+[-+]?\d+\b/i)?.[0] ?? "";
   const traits = chipText(typeRow?.value);
   const bodyRows = displayRows(rows);
   const content = [];
