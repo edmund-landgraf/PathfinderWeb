@@ -444,7 +444,7 @@ function buildUserEquipmentPayload(body) {
     priceText: cleanString(body?.price ?? body?.priceText ?? body?.Price ?? body?.PriceText, 200),
     bulkText: cleanString(body?.bulk ?? body?.bulkText ?? body?.Bulk ?? body?.BulkText, 100),
     usage: cleanString(body?.usage ?? body?.Usage, 200),
-    description: cleanString(body?.description ?? body?.Description ?? body?.summary ?? body?.Summary, 100000),
+    description: cleanString(body?.description ?? body?.Description ?? body?.summary ?? body?.Summary ?? body?.rawMD ?? body?.RawMD, 100000),
     traits: cleanString(body?.traits ?? body?.Traits, 8000),
     itemCategory: cleanString(body?.category ?? body?.itemCategory ?? body?.Category ?? body?.ItemCategory, 255),
     image: parseImagePayload(body)
@@ -3700,6 +3700,76 @@ async function sendTableRow(res, { id, missing, sqlText, param }) {
     res.status(500).json({ error: getErrorMessage(err) });
   }
 }
+
+app.patch('/api/user-equipment/:userEquipmentId', async (req, res) => {
+  if (rejectAdminIfLocked(req, res)) return;
+
+  const userEquipmentId = parseUserMonsterId(req.params.userEquipmentId);
+  if (!userEquipmentId) {
+    res.status(400).json({ error: 'Invalid userEquipmentId' });
+    return;
+  }
+
+  const fields = [
+    { keys: ['name', 'Name'], column: 'Name', kind: 'string', max: 255, sqlType: () => sql.NVarChar(255) },
+    { keys: ['level', 'Level'], column: 'Level', kind: 'int', sqlType: () => sql.Int },
+    { keys: ['rarity', 'Rarity'], column: 'Rarity', kind: 'string', max: 100, sqlType: () => sql.NVarChar(100) },
+    { keys: ['price', 'priceText', 'Price', 'PriceText'], column: 'PriceText', kind: 'string', max: 200, sqlType: () => sql.NVarChar(200) },
+    { keys: ['bulk', 'bulkText', 'Bulk', 'BulkText'], column: 'BulkText', kind: 'string', max: 100, sqlType: () => sql.NVarChar(100) },
+    { keys: ['usage', 'Usage'], column: 'Usage', kind: 'string', max: 200, sqlType: () => sql.NVarChar(200) },
+    { keys: ['description', 'Description', 'summary', 'Summary', 'rawMD', 'RawMD'], column: 'Description', kind: 'string', max: 100000, sqlType: () => sql.NVarChar(sql.MAX) },
+    { keys: ['traits', 'Traits'], column: 'Traits', kind: 'string', max: 8000, sqlType: () => sql.NVarChar(sql.MAX) },
+    { keys: ['category', 'itemCategory', 'Category', 'ItemCategory'], column: 'ItemCategory', kind: 'string', max: 255, sqlType: () => sql.NVarChar(255) }
+  ];
+
+  const body = req.body || {};
+  const sets = [];
+  let pool;
+  let request;
+
+  try {
+    pool = await getPool();
+    await ensureUserEquipmentSchema(pool);
+    request = pool.request().input('userEquipmentId', sql.Int, userEquipmentId);
+    for (const field of fields) {
+      const raw = firstBodyValue(body, field.keys);
+      if (raw === undefined) continue;
+      const value = field.kind === 'int' ? cleanInt(raw, field.column) : cleanString(raw, field.max);
+      if (field.column === 'Name' && !value) {
+        res.status(400).json({ error: 'Name is required.' });
+        return;
+      }
+      const param = `p${sets.length}`;
+      request.input(param, field.sqlType(), value);
+      sets.push(`${field.column} = @${param}`);
+    }
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: getErrorMessage(err) });
+    return;
+  }
+
+  if (!sets.length) {
+    res.status(400).json({ error: 'No fields to update.' });
+    return;
+  }
+
+  try {
+    const result = await request.query(`
+      UPDATE pf2.UserEquipment
+      SET ${sets.join(', ')}, UpdatedAt = SYSUTCDATETIME()
+      WHERE UserEquipmentId = @userEquipmentId;
+    `);
+    if (!result.rowsAffected?.[0]) {
+      res.status(404).json({ error: 'User equipment not found' });
+      return;
+    }
+    const row = await fetchEquipmentById(pool, -userEquipmentId);
+    res.json(row);
+  } catch (err) {
+    logError(err);
+    res.status(err.statusCode || 500).json({ error: getErrorMessage(err) });
+  }
+});
 
 app.post('/api/user-equipment', async (req, res) => {
   if (rejectAdminIfLocked(req, res)) return;
