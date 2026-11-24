@@ -383,7 +383,13 @@ export async function attachMonsterImageUrls(pool, rows) {
   if (!ids.length) return rows;
 
   const hasImage = await queryMonsterIdsWithImages(pool, ids);
-  const missingRows = rows.filter((row) => !hasImage.has(Number(row.MonsterId)));
+  const missingRows = rows.filter((row) => {
+    const monsterId = Number(row.MonsterId);
+    return row.ContentType !== 'user generated'
+      && Number.isInteger(monsterId)
+      && monsterId > 0
+      && !hasImage.has(monsterId);
+  });
   let relatedImageIds = new Map();
   try {
     relatedImageIds = await resolveRelatedImageMonsterIds(pool, missingRows);
@@ -392,7 +398,9 @@ export async function attachMonsterImageUrls(pool, rows) {
   }
 
   for (const row of rows) {
+    if (row.ContentType === 'user generated') continue;
     const monsterId = Number(row.MonsterId);
+    if (!Number.isInteger(monsterId) || monsterId <= 0) continue;
     if (hasImage.has(monsterId) || relatedImageIds.has(monsterId)) {
       row.ImageUrl = `/api/monsters/${monsterId}/image/thumb`;
     }

@@ -1590,6 +1590,7 @@ async function sendUserEquipmentSearch(req, res, pool, started) {
   const rows = result.recordsets?.[0] || [];
   const total = result.recordsets?.[1]?.[0]?.Total || 0;
   if (isArtEnabled(req)) art.filterRows(req, rows);
+  else hideArtUrls(rows);
   logValue('Rows returned:', rows.length);
   logValue('Total:', total);
   logValue('Elapsed ms:', Date.now() - started);
@@ -1968,6 +1969,7 @@ app.get('/api/equipment', async (req, res) => {
     const total = result.recordsets?.[1]?.[0]?.Total || 0;
     const rows = pageIds.length ? await hydrateEquipmentPage(pool, pageIds) : [];
     if (isArtEnabled(req)) art.filterRows(req, rows);
+    else hideArtUrls(rows);
 
     logValue('Rows returned:', rows.length);
     logValue('Total:', total);
@@ -3255,8 +3257,11 @@ app.get('/api/user-monsters', async (req, res) => {
       `);
     const rows = result.recordset || [];
     const total = rows[0]?.TotalCount ?? 0;
+    const results = rows.map(({ TotalCount, ...row }) => row);
+    if (isArtEnabled(req)) art.filterRows(req, results);
+    else hideArtUrls(results);
     res.json({
-      results: rows.map(({ TotalCount, ...row }) => row),
+      results,
       total,
       limit,
       offset
@@ -3282,6 +3287,8 @@ app.get('/api/user-monsters/:userMonsterId', async (req, res, next) => {
       res.status(404).json({ error: 'User monster not found' });
       return;
     }
+    if (isArtEnabled(req)) art.filterRows(req, [row]);
+    else hideArtUrls([row]);
     res.json(presentCreature(row));
   } catch (err) {
     logError(err);
@@ -3860,6 +3867,7 @@ app.get('/api/equipment/:equipmentId', async (req, res) => {
       return;
     }
     if (isArtEnabled(req)) art.filterRows(req, [row]);
+    else hideArtUrls([row]);
     res.json(row);
   } catch (err) {
     logError(err);
