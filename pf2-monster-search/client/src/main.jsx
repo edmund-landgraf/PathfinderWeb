@@ -17,6 +17,7 @@ import { utilitiesUpdatesDescription, webUpdatesDescription } from './updatesDes
 import { imageLibraryEntries } from './imagesLibrary.js';
 import './styles.css';
 import ArtReviewPanel from './ArtReviewPanel.jsx';
+import { buildPf2StatCardSvg } from './statcard/buildPf2StatCard.js';
 
 
 async function copyText(value) {
@@ -980,6 +981,13 @@ function getMonsterPermalinkId() {
   return Number.isInteger(monsterId) && monsterId !== 0 ? monsterId : null;
 }
 
+function getMonsterCard2Id() {
+  const match = window.location.pathname.match(/^\/monsters\/(-?\d+)\/card2$/i);
+  if (!match) return null;
+  const monsterId = Number(match[1]);
+  return Number.isInteger(monsterId) && monsterId !== 0 ? monsterId : null;
+}
+
 function getMonsterCardId() {
   const match = window.location.pathname.match(/^\/monsters\/(-?\d+)\/card$/i);
   if (!match) return null;
@@ -1020,8 +1028,13 @@ function monsterCardLink(monsterId, options = {}, origin = window.location.origi
   return `${origin}/monsters/${monsterId}/card${query ? `?${query}` : ''}`;
 }
 
+function monsterStatCardLink(monsterId, origin = window.location.origin) {
+  return `${origin}/monsters/${monsterId}/card2`;
+}
+
 function getCurrentPage() {
   const path = window.location.pathname.toLowerCase();
+  if (getMonsterCard2Id() != null) return 'monster-card2';
   if (getMonsterCardId() != null) return 'monster-card';
   if (getMonsterPermalinkId() != null) return 'monster';
   if (path === '/equipment') return 'equipment';
@@ -1057,6 +1070,10 @@ function AppRoutes() {
   function navigate(path) {
     window.history.pushState(null, '', path);
     setPage(getCurrentPage());
+  }
+
+  if (page === 'monster-card2') {
+    return <MonsterCard2Page monsterId={getMonsterCard2Id()} />;
   }
 
   if (page === 'monster-card') {
@@ -2046,8 +2063,88 @@ function FeatsPage({ onNavigate }) {
   );
 }
 
+const emptyUserEquipmentForm = {
+  name: '',
+  level: '',
+  rarity: '',
+  category: '',
+  price: '',
+  bulk: '',
+  usage: '',
+  traits: '',
+  description: ''
+};
+
+function AddUserEquipmentModal({ lookups, onClose, onCreated }) {
+  const [form, setForm] = useState(emptyUserEquipmentForm);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  function setField(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+
+    try {
+      const res = await fetchApi('/api/user-equipment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      onCreated(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="userMonsterModal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="userMonsterModalHeader">
+          <div>
+            <h2>Add custom item</h2>
+            <p>Content type: user generated</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="userMonsterGrid">
+          <Field label="Name"><TextInput value={form.name} onChange={v => setField('name', v)} placeholder="Item name" /></Field>
+          <Field label="Level"><TextInput value={form.level} onChange={v => setField('level', v)} /></Field>
+          <Field label="Rarity"><SelectInput value={form.rarity} onChange={v => setField('rarity', v)} options={lookups.rarity || []} /></Field>
+          <Field label="Category"><TextInput value={form.category} onChange={v => setField('category', v)} placeholder="Weapon, Armor, Item..." /></Field>
+          <Field label="Price"><TextInput value={form.price} onChange={v => setField('price', v)} placeholder="10 gp" /></Field>
+          <Field label="Bulk"><TextInput value={form.bulk} onChange={v => setField('bulk', v)} placeholder="L, 1..." /></Field>
+          <Field label="Usage"><TextInput value={form.usage} onChange={v => setField('usage', v)} placeholder="held in 1 hand" /></Field>
+          <Field label="Traits"><TextInput value={form.traits} onChange={v => setField('traits', v)} placeholder="magical, fire" /></Field>
+        </div>
+
+        <div className="userMonsterWideFields">
+          <Field label="Description"><TextAreaInput value={form.description} onChange={v => setField('description', v)} rows={7} /></Field>
+        </div>
+
+        {error && <p className="error">{error}</p>}
+
+        <div className="actions userMonsterActions">
+          <button type="submit" className="primary" disabled={submitting || !form.name.trim()}><Plus size={16} /> Add item</button>
+          <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EquipmentPage({ onNavigate }) {
+  const { adminEnabled } = useArt();
   const [filters, setFilters] = useState(emptyEquipmentFilters);
+  const [isAddUserEquipmentOpen, setIsAddUserEquipmentOpen] = useState(false);
   const [lookups, setLookups] = useState({ rarity: [], sourceBook: [], trait: [] });
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -2257,6 +2354,11 @@ function EquipmentPage({ onNavigate }) {
           <div className="actions">
             <button className="primary" onClick={() => search(0)} disabled={loading}><Search size={16} /> Search</button>
             <button onClick={reset} disabled={loading}><RotateCcw size={16} /> Reset</button>
+            {adminEnabled && (
+              <button type="button" onClick={() => setIsAddUserEquipmentOpen(true)} disabled={loading}>
+                <Plus size={16} /> Add custom item
+              </button>
+            )}
           </div>
 
           {selected && <EquipmentDetailCard item={selected} />}
@@ -2336,6 +2438,24 @@ function EquipmentPage({ onNavigate }) {
       <EquipmentModal
         item={selectedEquipment}
         onClose={() => setSelectedEquipment(null)}
+      />
+    )}
+    {adminEnabled && isAddUserEquipmentOpen && (
+      <AddUserEquipmentModal
+        lookups={lookups}
+        onClose={() => setIsAddUserEquipmentOpen(false)}
+        onCreated={(item) => {
+          setIsAddUserEquipmentOpen(false);
+          if (filters.contentType === 'canon') return;
+          const row = {
+            ...item,
+            EquipmentType: item.EquipmentType || item.ItemCategory || '',
+            Summary: item.Summary || item.Description || ''
+          };
+          setRows((prev) => [row, ...prev.filter((existing) => existing.EquipmentId !== row.EquipmentId)]);
+          setTotal((prev) => prev + 1);
+          setSelected(row);
+        }}
       />
     )}
     <RowActionMenu menu={menu} onClose={closeRowMenu} />
@@ -3510,6 +3630,57 @@ function buildMonsterCardHtml(monster, options) {
 </html>`;
 }
 
+function MonsterCard2Page({ monsterId }) {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      setSvg('');
+      try {
+        const res = await fetchApi(`/api/monsters/${monsterId}`);
+        if (res.status === 404) throw new Error('Monster not found');
+        if (!res.ok) throw new Error(await readApiError(res));
+        const monster = await res.json();
+        const imageUrl = getMonsterImageUrl(monster, 'full');
+        let artFile = null;
+        if (imageUrl) {
+          const artRes = await fetch(imageUrl, { credentials: 'include' });
+          if (artRes.ok) {
+            const blob = await artRes.blob();
+            if (blob.size) artFile = new File([blob], 'creature-art', { type: blob.type || 'image/png' });
+          }
+        }
+        const file = await buildPf2StatCardSvg(monster, artFile);
+        const markup = await file.text();
+        if (!cancelled) setSvg(markup);
+      } catch (err) {
+        if (!cancelled) setError(err.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [monsterId]);
+
+  return (
+    <div className="pf2-card2-page">
+      {loading && <p className="pf2-card2-status">Loading...</p>}
+      {error && <p className="pf2-card2-status">{error}</p>}
+      {svg && <div className="pf2-card2-sheet" dangerouslySetInnerHTML={{ __html: svg }} />}
+    </div>
+  );
+}
+
 function MonsterCardPage({ monsterId, onNavigate }) {
   const [monster, setMonster] = useState(null);
   const [error, setError] = useState('');
@@ -4148,7 +4319,7 @@ function isSupportedMarkdownHref(href) {
 
     return localMarkdownRoutes.has(url.pathname.toLowerCase())
       || /^\/monsters\/-?\d+$/i.test(url.pathname)
-      || /^\/monsters\/-?\d+\/card$/i.test(url.pathname);
+      || /^\/monsters\/-?\d+\/card2?$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -4774,7 +4945,14 @@ function MonsterModal({ monster, onClose, onArtUploaded }) {
                 <button
                   type="button"
                   className="modal-small-button"
-                  onClick={() => window.open(monsterCardLink(monster.MonsterId), `monster-card-${monster.MonsterId}`, 'popup=yes,width=920,height=900')}
+                  onClick={() => window.open(monsterCardLink(monster.MonsterId), `monster-summary-${monster.MonsterId}`, 'popup=yes,width=920,height=900')}
+                >
+                  <Clipboard size={15} /> Summary
+                </button>
+                <button
+                  type="button"
+                  className="modal-small-button"
+                  onClick={() => window.open(monsterStatCardLink(monster.MonsterId), `monster-stat-card-${monster.MonsterId}`, 'popup=yes,width=760,height=980')}
                 >
                   <Clipboard size={15} /> Stat card
                 </button>

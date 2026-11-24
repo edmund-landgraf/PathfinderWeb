@@ -2152,3 +2152,28 @@ tr { cursor: pointer; }
 .artReviewList { display: grid; gap: 8px; }
 .artReviewRow { display: grid; grid-template-columns: 64px 1fr auto auto; gap: 10px; align-items: center; }
 .artReviewRow img, .artReviewNoImg { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; background: #222; display: grid; place-items: center; }
+
+.pf2-card2-page {
+  min-height: 100vh;
+  margin: 0;
+  background: #2a211c;
+  display: flex;
+  justify-content: center;
+  padding: 28px 16px 48px;
+}
+
+.pf2-card2-sheet {
+  width: min(700px, 100%);
+}
+
+.pf2-card2-sheet svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #f6f2e9;
+}
+
+.pf2-card2-status {
+  color: #f4efe8;
+  font-family: Georgia, serif;
+}
